@@ -18,13 +18,21 @@ function drawVision(s=state) {
     vx.strokeStyle=grid[y][x]==='?'?'#ff5252':grid[y][x]==='B'?'#00bfff':grid[y][x]==='W'?'#ff4fcd':'#3ecf8e';vx.lineWidth=2;vx.stroke();
   }
  }
-$('vision-start').onclick=()=>action('vision-start');
+$('vision-start').onclick=()=>action('vision-start',{presence:$('vision-presence').value==='on',presencePort:Number($('vision-presence-port').value)});
+let presenceLoaded=false;
+$('vision-presence').onchange=()=>{$('vision-presence-port-label').hidden=$('vision-presence').value!=='on';};
 $('vision-arm').onclick=()=>action('vision-arm');
 $('vision-pause').onclick=()=>action('vision-pause');
 $('vision-stop').onclick=()=>action('vision-stop');
 $('vision-pass').onclick=()=>{if(confirm('Confirm that the player whose turn is shown actually passed in FoxGo?'))action('vision-pass');};
 window.renderVision=s=>{
   const v=s.vision||{}, running=!!v.running;
+  if(!presenceLoaded){$('vision-presence').value=s.settings.visionPresence?'on':'off';$('vision-presence-port').value=s.settings.visionPresencePort||6001;presenceLoaded=true;}
+  $('vision-presence').disabled=pending||running;
+  $('vision-presence-port').disabled=pending||running;
+  $('vision-presence-port-label').hidden=$('vision-presence').value!=='on';
+  const p=s.presence||{};
+  $('vision-presence-status').textContent=p.listening?`${p.connected?'FoxGo connected':'Listening'} at 127.0.0.1:${p.port} · CV controls moves${p.lastMessage?' · '+p.lastMessage:''}`:($('vision-presence').value==='on'?'Starts with screen tracking. Stop tracking to change this option.':'AI presence listener off');
   $('vision-badge').textContent=v.armed?'Automatic moves enabled':running?'Preview / paused':'Stopped';
   $('vision-status').textContent=[v.status,v.historyNote,v.confidence!==undefined?`Minimum confidence ${(v.confidence*100).toFixed(0)}%`:'',v.pendingMove?`Pending ${v.pendingMove}`:''].filter(Boolean).join(' · ');
   $('vision-role').textContent=v.roleStatus||'Waiting to identify your account in FoxGo';

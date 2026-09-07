@@ -36,8 +36,10 @@ class Trainer:
         self.fox_game = {'status': 'Offline'}
         self.connector = 'direct'
         self.vision = None
+        self.presence = None
         self.settings = dict(executable='', model='', config=str(ROOT/'config'/'gtp.cfg'),
-                             visits=200, seconds=2.0, aiColor='W', foxAccount='', heartOpening=False)
+                             visits=200, seconds=2.0, aiColor='W', foxAccount='', heartOpening=False,
+                             visionPresence=False,visionPresencePort=6001)
         self.revision = 0
         saved = self.data_dir / 'settings.json'
         if saved.exists():
@@ -79,7 +81,7 @@ class Trainer:
                 result=b.result, history=b.history, analysis=self.analysis,
                 evaluations=self.evaluations, analyses=self.analyses, logs=list(self.logs), busy=self.busy,
                 mode=self.mode, engine=bool(self.engine and self.engine.alive),
-                settings=self.settings, entertainment=opening, foxConnected=self.fox_connected,
+                settings=self.settings, entertainment=opening, presence=self.presence.state() if self.presence else {}, foxConnected=self.fox_connected,
                 foxReady=self.fox_ready, foxPort=self.fox_port, foxReserve=self.fox_reserve,
                 foxGame=self.fox_game, connector=self.connector,
                 vision=self.vision.state() if self.vision else {}, revision=self.revision))
@@ -384,6 +386,7 @@ class Trainer:
         return self.state()
 
     def close(self):
+        if self.presence:self.presence.stop();self.presence=None
         if self.vision:self.vision.stop()
         if self.fox_server:
             self.fox_server.stop()
@@ -398,13 +401,32 @@ class Trainer:
         if not self.vision:self.vision=VisionConnector(self)
         v=self.vision
         if name=='vision-pause':v.pause();return self.state()
-        if name=='vision-stop':v.stop()
+        if name=='vision-stop':
+            v.stop()
+            if self.presence:self.presence.stop();self.presence=None
         if not self.operation.acquire(timeout=10):raise ValueError('Wait for the current engine operation.')
         try:
             if name=='vision-start' and v.started:
                 raise ValueError('Vision is already running.')
             if name=='vision-start':
-                v.start(data);self.mode='vision';self.connector='vision'
+                enabled=data.get('presence',self.settings.get('visionPresence',False))
+                port=int(data.get('presencePort',self.settings.get('visionPresencePort',6001)))
+                if not isinstance(enabled,bool) or not 1024<=port<=65535:raise ValueError('Choose an AI presence port from 1024 to 65535.')
+                listener=None
+                try:
+                    if enabled:
+                        from .fox_presence import FoxPresence
+                        listener=FoxPresence(self,port)
+                    v.start(data)
+                    self.presence=listener
+                    if listener:listener.start()
+                except Exception:
+                    if listener:listener.stop()
+                    if v.started:v.stop()
+                    self.presence=None
+                    raise
+                self.settings.update(visionPresence=enabled,visionPresencePort=port)
+                self.mode='vision';self.connector='vision';self.save()
             elif name=='vision-arm':v.arm()
             elif name=='vision-pass':
                 if not v.started or not v.initialized:raise ValueError('Start tracking first.')

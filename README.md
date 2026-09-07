@@ -137,3 +137,9 @@ If FoxGo runs as Administrator and the trainer does not, Windows blocks input ev
 ### Automatic screen game lifecycle
 
 Leave screen tracking running between matches. It waits while FoxGo is in the lobby or showing a finished game. Three consistent observations of a new room, a new active game after the previous game ended, or an opening board with a reset move counter trigger fresh tracking. Pending clicks, old analysis, and heart-opening progress are cleared; player color is detected again. A manually paused connector stays paused. A fault blocks further moves in that game but permits automatic recovery when a new game is confirmed.
+
+### AI presence while using screen control
+
+Under Screen / computer vision, choose **CV + AI presence listener** before starting tracking. The default port is **6001**. Connect FoxGo AI management to **127.0.0.1:6001** and leave **prohibit manual moves disabled**. The panel shows whether FoxGo is connected. FoxGo controls its own AI indicator; this listener provides the TCP connection, without guaranteeing a particular client badge.
+
+CV remains the only move controller. Presence packets never change the board or trigger TCP moves, resignation, or scoring responses. Pausing clicks keeps the connection open; stopping tracking closes the listener. Choose **CV only** to disable it. The option and port are saved when tracking starts. Direct TCP and FoxGTP remain separate move-controller choices.
