@@ -1,4 +1,4 @@
-"""Exercise the installed real KataGo over HTTP and FoxGTP TCP (isolated session).
+"""Exercise the installed real KataGo over HTTP and direct FoxGo TCP (isolated session).
 
 Run after setup_katago.py. Does not contact FoxGo or join an online match.
 """
@@ -15,6 +15,7 @@ ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT))
 from trainer.app import Trainer
 from trainer.server import create_server
+from trainer.fox_protocol import encode
 
 
 def main():
@@ -37,6 +38,14 @@ def main():
             assert state['engine'] and state['analysis']['choices']
             assert len(state['analysis']['ownership'])==361
             print('PASS: real GPU engine, streaming candidates and ownership',flush=True)
+            app.engine.command('kata-set-param maxVisits 100000')
+            app.engine.command('kata-set-param maxTime 10')
+            cancelled=threading.Event()
+            app.engine.command('kata-search_analyze_cancellable B 25',lambda _:cancelled.set(),cancel_event=cancelled)
+            assert cancelled.is_set() and app.engine.command('name')=='KataGo'
+            app.engine.command(f'kata-set-param maxVisits {settings["visits"]}')
+            app.engine.command(f'kata-set-param maxTime {settings["seconds"]}')
+            print('PASS: real search cancellation and subsequent GTP synchronization',flush=True)
             state=action('play',{'vertex':'D4'})
             assert len(state['moves'])==2 and state['grid'][15][3]=='B'
             assert state['analyses'].get('1') and state['evaluations'].get('2')
@@ -47,21 +56,15 @@ def main():
             action('fox-start',{'port':port})
             with socket.create_connection(('127.0.0.1',port),timeout=30) as sock:
                 reader=sock.makefile('rb')
-                def command(ident,text):
-                    sock.sendall(f'{ident} {text}\n'.encode())
-                    response=b''
-                    while not response.endswith(b'\n\n'):
-                        line=reader.readline()
-                        assert line,'unexpected EOF'
-                        response+=line
-                    assert response.startswith(f'={ident}'.encode()),response
-                    return response.decode()
-                for ident,cmd in enumerate(['protocol_version','clear_board','boardsize 19','komi 6.5',
-                    'time_settings 60 29 1','time_left B 60 0','play B D4','genmove W','final_score'],1):
-                    reply=command(ident,cmd)
-                    if cmd=='genmove W':assert 'info move' not in reply and len(reply.splitlines())==2
+                sock.sendall(encode('FARULE',19,60,30,5,650)+encode('FASTATUS',1,'W','1^3^15^B')+encode('FATIMELEFT',60,30,5)+encode('FAMOVE',1,'W','1^3^15^B'))
+                reply=reader.readline()
+                assert reply.startswith(b'$AFPLAY,W,'),reply
+                record=reply.split(b'*')[0].split(b',')[2].decode()
+                sock.sendall(encode('FAMOVE',0,'W',record)+encode('FASCORE',1))
+                reply=reader.readline()
+                assert reply.startswith(b'$AFSCORE,1,') and b'error' not in reply,reply
                 reader.close()
-            print('PASS: numbered FoxGTP commands, clocks, real generated reply and scoring',flush=True)
+            print('PASS: direct FoxGo packets, clocks, confirmed real move and scoring',flush=True)
             action('fox-stop')
             state=action('new',{'size':9,'handicap':2})
             assert len(state['handicap'])==2

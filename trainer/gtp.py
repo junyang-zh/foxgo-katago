@@ -75,7 +75,9 @@ class GTP:
         for line in self.process.stderr:
             self.log('engine', line.rstrip())
 
-    def command(self, command, on_analysis=None):
+    def command(self, command, on_analysis=None, cancel_event=None):
+        if cancel_event is not None and not command.startswith('kata-search_analyze_cancellable '):
+            raise ValueError('Cancellation is only supported for non-mutating KataGo searches.')
         if '\n' in command or '\r' in command:
             raise ValueError('GTP commands must be a single line.')
         with self.lock:
@@ -91,10 +93,20 @@ class GTP:
                 raise EngineError('KataGo input closed.') from exc
             deadline = time.monotonic() + self.timeout
             started, success, payload = False, False, []
+            cancelled = False
             while True:
+                if time.monotonic() >= deadline:
+                    self.close()
+                    raise EngineError('KataGo timed out; process stopped to prevent desynchronization.')
+                if cancel_event is not None and cancel_event.is_set() and not cancelled:
+                    self.process.stdin.write('\n')
+                    self.process.stdin.flush()
+                    cancelled = True
                 try:
-                    line = self.lines.get(timeout=max(.01, deadline-time.monotonic()))
+                    line = self.lines.get(timeout=min(.05,max(.001,deadline-time.monotonic())))
                 except queue.Empty:
+                    if time.monotonic() < deadline:
+                        continue
                     self.close()
                     raise EngineError('KataGo timed out; process stopped to prevent desynchronization.')
                 if line is None:

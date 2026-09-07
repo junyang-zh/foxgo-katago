@@ -82,7 +82,7 @@ def create_server(app, port=8173):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Personal KataGo trainer with official FoxGTP bridge')
+    parser = argparse.ArgumentParser(description='Personal KataGo trainer with direct FoxGo TCP connection')
     parser.add_argument('--port',type=int,default=8173)
     parser.add_argument('--data-dir',type=Path,default=ROOT/'data')
     args = parser.parse_args()

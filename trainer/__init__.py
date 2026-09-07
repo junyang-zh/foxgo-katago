@@ -1,1 +1,1 @@
-"""Local KataGo trainer and official FoxGTP bridge."""
+"""Local KataGo trainer and direct FoxGo TCP connection."""

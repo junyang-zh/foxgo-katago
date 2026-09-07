@@ -132,7 +132,8 @@ function renderControls() {
   document.querySelectorAll('[data-local]').forEach(b=>b.disabled=busy||online||reviewing!==null);
   document.querySelectorAll('[data-engine]').forEach(b=>b.disabled=b.disabled||!state.engine);
   $('settings-open').disabled=busy||online;
-  $('fox-toggle').disabled=busy||(!online&&!state.engine);
+  $('fox-toggle').disabled=pending||(!online&&(busy||!state.engine));
+  $('fox-reserve').disabled=online||busy;
   $('fox-port').disabled=online||busy;
   $('busy-label').textContent=state.busy?' / '+state.busy:'';
 }
@@ -148,11 +149,14 @@ function render() {
   $('game-meta').textContent=`${state.size} × ${state.size} · ${state.rules==='chinese'?'Chinese':'Japanese'} · Komi ${state.komi}`;
   $('history').max=state.moves.length; $('history').value=atMove();
   $('move-number').textContent=`Move ${atMove()} / ${state.moves.length}`;
-  $('fox-status').textContent=state.foxConnected?(state.foxReady?'FoxGTP synced':'FoxGTP connected'):state.mode==='online'?'Listening':'Offline';
-  $('fox-toggle').textContent=state.mode==='online'?'Stop bridge':'Start bridge';
+  $('fox-status').textContent=state.foxConnected?(state.foxReady?'FoxGo synced':'FoxGo connected'):state.mode==='online'?'Listening':'Offline';
+  $('fox-toggle').textContent=state.mode==='online'?'Stop listener':'Start listener';
+  const fg=state.foxGame||{};
+  $('fox-detail').textContent=[fg.status,fg.aiColor?`AI ${fg.aiColor} · main ${fg.mainTime}s · byo ${fg.byoTime}s × ${fg.periods}`:'',fg.pendingMove?`Awaiting confirmation: ${fg.pendingMove}`:''].filter(Boolean).join(' · ');
+  if(document.activeElement!==$('fox-reserve')) $('fox-reserve').value=state.foxReserve;
   if(document.activeElement!==$('fox-port')) $('fox-port').value=state.foxPort;
   renderBoard();renderChart();renderChoices();renderControls();renderLogs();
-  if(!lastNotice&&!pending) showNotice(state.busy?`Working: ${state.busy}…`:reviewing!==null?'Review mode. Return to Live to play.':state.mode==='online'?'Online observer: FoxGTP controls the game.':state.result||(!state.engine?'Two-player practice is available. Connect KataGo for AI play and analysis.':'Click an intersection to play. Candidate numbers show KataGo’s preferred moves.'));
+  if(!lastNotice&&!pending) showNotice(state.busy?`Working: ${state.busy}…`:reviewing!==null?'Review mode. Return to Live to play.':state.mode==='online'?'Online observer: FoxGo controls the game.':state.result||(!state.engine?'Two-player practice is available. Connect KataGo for AI play and analysis.':'Click an intersection to play. Candidate numbers show KataGo’s preferred moves.'));
 }
 function renderLogs() {
   const box=$('logs'), bottom=box.scrollTop+box.clientHeight>=box.scrollHeight-25;
@@ -189,7 +193,7 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();$('settings-error').tex
 $('engine-stop').onclick=async()=>{if(await action('engine-stop'))$('settings-dialog').close();};
 $('new-open').onclick=()=>$('new-dialog').showModal();
 $('new-form').onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));$('new-dialog').close();await action('new',data);};
-$('fox-toggle').onclick=()=>action(state.mode==='online'?'fox-stop':'fox-start',{port:Number($('fox-port').value)});
+$('fox-toggle').onclick=()=>action(state.mode==='online'?'fox-stop':'fox-start',{port:Number($('fox-port').value),reserve:Number($('fox-reserve').value)});
 function review(n){reviewing=Math.max(0,Math.min(state.moves.length,n));selectedChoice=null;render();}
 $('history').oninput=e=>review(Number(e.target.value));$('back').onclick=()=>review(atMove()-1);$('forward').onclick=()=>review(atMove()+1);
 $('live').onclick=()=>{reviewing=null;selectedChoice=null;render();};
@@ -203,7 +207,7 @@ if (document.modelContext?.registerTool) {
     try {Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}
     catch { /* Experimental API unavailable in this browser. */ }
   };
-  register({name:'read_go_position',description:'Read the current local or FoxGTP game position and engine status.',
+  register({name:'read_go_position',description:'Read the current local or FoxGo game position and engine status.',
     inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},
     execute:()=>{if(!state)throw Error('Trainer is loading.');return {size:state.size,turn:state.turn,moves:state.moves,mode:state.mode,engine:state.engine};}});
   register({name:'play_local_go_move',description:'Play a move in the live local game, including a configured automatic KataGo reply. Not available in online or history mode.',

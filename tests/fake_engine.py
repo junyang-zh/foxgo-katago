@@ -3,8 +3,15 @@ import sys
 import time
 
 for line in sys.stdin:
+    if not line.strip():
+        continue
     ident, command = line.strip().split(' ',1)
     verb = command.split()[0]
+    if verb == 'kata-search_analyze_cancellable' and '--wait-cancel' in sys.argv:
+        print(f'={ident}\ninfo move D4 visits 1 winrate .5 scoreLead 0 order 0 pv D4',flush=True)
+        sys.stdin.readline()
+        print('play cancelled\n',flush=True)
+        continue
     if verb == 'hang':
         time.sleep(5)
     if verb == 'reject':

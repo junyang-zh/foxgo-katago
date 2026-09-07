@@ -92,23 +92,6 @@ class IntegrationTests(unittest.TestCase):
         before=deepcopy(self.app.board.__dict__)
         with self.assertRaises(ValueError):self.app.action('play',{'vertex':'E5'})
         self.assertEqual(before,self.app.board.__dict__)
-    def test_online_fragmentation_pipeline_ids_and_lock(self):
-        server=FoxServer(self.app,0);self.app.fox_server=server;self.app.mode='online';server.start()
-        port=server.socket.getsockname()[1]
-        with socket.create_connection(('127.0.0.1',port),timeout=3) as s:
-            file=s.makefile('rb')
-            def response():
-                out=b''
-                while not out.endswith(b'\n\n'):out+=file.readline()
-                return out.decode()
-            s.sendall(b'101 protocol_ver');s.sendall(b'sion\r\n102 clear_board\n103 boardsize 9\n104 komi 6.5\n105 play B E5\n106 genmove W\n')
-            answers=[response() for _ in range(6)]
-            self.assertEqual(answers[0],'=101 2\n\n');self.assertEqual(answers[5],'=106 D4\n\n')
-            self.assertEqual(self.app.board.moves,[['B','E5'],['W','D4']])
-            with self.assertRaises(ValueError):self.app.action('play',{'vertex':'C3'})
-            s.sendall(b'107 time_settings 60 29 1\n108 time_left W 29 1\n109 final_score\n110 quit\n')
-            self.assertEqual([response() for _ in range(4)],['=107 \n\n','=108 \n\n','=109 B+2.5\n\n','=110 \n\n'])
-            file.close()
     def test_http_token_origin_and_static(self):
         server=create_server(self.app,0);threading.Thread(target=server.serve_forever,daemon=True).start()
         c=http.client.HTTPConnection('127.0.0.1',server.server_port)

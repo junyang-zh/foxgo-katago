@@ -31,7 +31,9 @@ class Trainer:
         self.fox_connected = False
         self.fox_ready = False
         self.fox_server = None
-        self.fox_port = 8001
+        self.fox_port = 6001
+        self.fox_reserve = 1.0
+        self.fox_game = {'status': 'Offline'}
         self.settings = dict(executable='', model='', config=str(ROOT/'config'/'gtp.cfg'),
                              visits=200, seconds=2.0, aiColor='W')
         self.revision = 0
@@ -70,7 +72,8 @@ class Trainer:
                 evaluations=self.evaluations, analyses=self.analyses, logs=list(self.logs), busy=self.busy,
                 mode=self.mode, engine=bool(self.engine and self.engine.alive),
                 settings=self.settings, foxConnected=self.fox_connected,
-                foxReady=self.fox_ready, foxPort=self.fox_port, revision=self.revision))
+                foxReady=self.fox_ready, foxPort=self.fox_port, foxReserve=self.fox_reserve,
+                foxGame=self.fox_game, revision=self.revision))
 
     def save(self):
         with self.state_lock:
@@ -172,7 +175,6 @@ class Trainer:
 
     def generate(self, c=None):
         c = color(c or self.board.turn)
-        # FoxGTP can explicitly request either color after recovery or setup.
         with self.state_lock:
             self.board.turn = c
         reply = self.require_engine().command(
@@ -193,12 +195,14 @@ class Trainer:
         return vertex.lower() if vertex in ('PASS','RESIGN') else vertex
 
     def action(self, name, data):
-        if not self.operation.acquire(timeout=.25):
+        if name == 'fox-stop' and self.fox_server:
+            self.fox_server.stop()
+        if not self.operation.acquire(timeout=10 if name == 'fox-stop' else .25):
             raise ValueError('An operation is in progress. Wait for it to finish.')
         self.busy = name
         try:
             if self.mode == 'online' and name not in ('fox-stop',):
-                raise ValueError('Stop the FoxGTP bridge before changing the engine or local game.')
+                raise ValueError('Stop the FoxGo connection before changing the engine or local game.')
             if name == 'engine-connect':
                 self.connect_engine(data)
                 self.analyze()
@@ -276,7 +280,12 @@ class Trainer:
             elif name == 'fox-start':
                 from .fox import FoxServer
                 self.require_engine()
-                port = int(data.get('port',8001))
+                port = int(data.get('port',6001))
+                reserve = float(data.get('reserve',1))
+                if not math.isfinite(reserve) or not .1 <= reserve <= 10:
+                    raise ValueError('Use a clock reserve of 0.1–10 seconds.')
+                if self.engine.command('known_command kata-search_analyze_cancellable').strip() != 'true':
+                    raise EngineError('Direct FoxGo play requires KataGo cancellable search support.')
                 if not 1024 <= port <= 65535:
                     raise ValueError('Choose a TCP port from 1024 to 65535.')
                 server = FoxServer(self, port)
@@ -290,16 +299,22 @@ class Trainer:
                 self.evaluations = {}
                 self.analyses = {}
                 self.fox_server, self.fox_port = server, port
+                self.fox_reserve = reserve
+                self.fox_game = {'status':'Listening · connect FoxGo'}
                 self.mode = 'online'
                 server.start()
-                self.log('fox', f'Listening on 127.0.0.1:{port}; waiting for official FoxGTP.')
+                self.log('fox', f'Listening for FoxGo directly on 127.0.0.1:{port}.')
             elif name == 'fox-stop':
                 if self.fox_server:
                     self.fox_server.stop()
                 self.fox_server = None
                 self.mode = 'local'
                 self.fox_connected = self.fox_ready = False
-                self.log('fox', 'Bridge stopped. Local controls enabled.')
+                self.fox_game = {'status':'Offline'}
+                if self.engine and self.engine.alive:
+                    self.engine.command('kata-time_settings none')
+                    self.engine.command(f'kata-set-param maxTime {self.settings["seconds"]}')
+                self.log('fox', 'FoxGo listener stopped. Local controls enabled.')
             else:
                 raise ValueError('Unknown action.')
             self.save()
@@ -311,63 +326,10 @@ class Trainer:
             self.operation.release()
         return self.state()
 
-    def fox_command(self, command):
-        """Called with operation lock held. Never inject review searches into Fox time."""
-        fields = command.split()
-        if not fields:
-            raise ValueError('Empty command.')
-        verb, args = fields[0].lower(), fields[1:]
-        allowed = {'protocol_version','name','version','list_commands','known_command','quit',
-                   'clear_board','boardsize','komi','time_settings','time_left','set_free_handicap',
-                   'play','genmove','final_score','showboard'}
-        if verb not in allowed:
-            raise ValueError('unknown command')
-        if verb == 'quit':
-            return ''
-        if verb == 'list_commands':
-            return '\n'.join(sorted(allowed))
-        if verb == 'known_command':
-            return 'true' if len(args) == 1 and args[0] in allowed else 'false'
-        if verb in ('play','genmove','set_free_handicap') and not self.fox_ready:
-            raise ValueError('Send clear_board before starting or restoring a game.')
-        engine = self.require_engine()
-        if verb == 'genmove':
-            if len(args) != 1:
-                raise ValueError('genmove requires a color')
-            return self.generate(args[0])
-        candidate = None
-        if verb == 'boardsize':
-            candidate = Board(int(args[0]),self.board.komi,self.board.rules)
-        elif verb == 'clear_board':
-            candidate = Board(self.board.size,self.board.komi,self.board.rules)
-        elif verb == 'komi':
-            value = float(args[0])
-            if not math.isfinite(value) or abs(value) > 100:
-                raise ValueError('Invalid komi')
-            candidate = deepcopy(self.board)
-            candidate.komi = value
-        elif verb == 'set_free_handicap':
-            candidate = deepcopy(self.board)
-            candidate.setup([v.upper() for v in args])
-        elif verb == 'play':
-            if len(args) != 2:
-                raise ValueError('play requires color and vertex')
-            candidate = deepcopy(self.board)
-            candidate.play(color(args[0]),args[1], authoritative=True)
-        response = engine.command(command)
-        if candidate:
-            self.commit_board(candidate)
-        if verb in ('clear_board','boardsize','komi','set_free_handicap'):
-            self.evaluations = {}
-            self.analyses = {}
-        if verb == 'clear_board':
-            self.fox_ready = True
-        if verb == 'final_score':
-            self.log('fox score', response)
-        return response
-
     def close(self):
         if self.fox_server:
             self.fox_server.stop()
+        with self.operation:
+            pass
         if self.engine:
             self.engine.close()
