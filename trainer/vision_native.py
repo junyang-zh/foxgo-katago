@@ -29,6 +29,7 @@ class WindowsDesktop:
         self.u.GetWindowThreadProcessId.argtypes = [W.HWND,C.POINTER(W.DWORD)]
         self.u.IsWindowVisible.argtypes = [W.HWND]
         self.u.IsIconic.argtypes = [W.HWND]
+        self.u.SetForegroundWindow.argtypes = [W.HWND]
         self.k.OpenProcess.argtypes = [W.DWORD,W.BOOL,W.DWORD]
         self.k.OpenProcess.restype = W.HANDLE
         self.k.QueryFullProcessImageNameW.argtypes = [W.HANDLE,W.DWORD,W.LPWSTR,C.POINTER(W.DWORD)]
@@ -74,10 +75,17 @@ class WindowsDesktop:
 
     def capture(self, hwnd):
         info=self.describe(hwnd)
-        if self.u.IsIconic(hwnd) or self.u.GetForegroundWindow()!=hwnd:
-            raise ValueError('Bring the calibrated FoxGo window to the foreground.')
-        image=self.grab(bbox=tuple(info['rect']),all_screens=True).convert('RGB')
+        if self.u.IsIconic(hwnd):raise ValueError('Restore the minimized FoxGo window.')
+        image=self.grab(window=hwnd).convert('RGB')
+        if image.size!=(info['rect'][2]-info['rect'][0],info['rect'][3]-info['rect'][1]):
+            raise ValueError('FoxGo capture dimensions disagree with window geometry.')
         return image,info
+
+    def prepare_click(self, hwnd):
+        self.describe(hwnd)
+        if self.u.GetForegroundWindow()!=hwnd:self.u.SetForegroundWindow(hwnd)
+        if self.u.GetForegroundWindow()!=hwnd:
+            raise ValueError('Windows prevented FoxGo activation; select FoxGo once to allow input.')
 
     def emergency(self):
         return bool(self.u.GetAsyncKeyState(0x1B)&0x8000)

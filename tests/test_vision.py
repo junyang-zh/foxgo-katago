@@ -8,7 +8,8 @@ except ImportError:
     raise unittest.SkipTest('Install Pillow to run vision tests.')
 from trainer.app import Trainer
 from trainer.board import Board
-from trainer.vision import VisionConnector, calibration, recognize, next_board
+from trainer.vision import VisionConnector, calibration, recognize, next_board, detect_board
+from unittest.mock import patch
 
 
 def board_image(board):
@@ -44,6 +45,7 @@ class Desktop:
         info={**self.info,'moveNumber':len(self.board.moves)}
         return board_image(self.board),info
     def emergency(self):return self.escape
+    def windows(self):return [self.info.copy()]
     def click(self,*args):self.clicks.append(args)
 
 
@@ -97,13 +99,64 @@ class VisionTests(unittest.TestCase):
         self.assertEqual(self.desktop.clicks,[])
     def test_wrong_title_or_count_prevents_click(self):
         self.desktop.info['active']=False;self.v.armed=True
-        with self.assertRaises(ValueError):self.stable_tick()
+        self.stable_tick()
         self.assertEqual(self.desktop.clicks,[])
+        self.assertTrue(self.v.armed)
+        self.desktop.info['active']=True;self.stable_tick()
+        self.assertEqual(len(self.desktop.clicks),1)
     def test_escape_and_geometry_changes_prevent_click(self):
         self.v.armed=True;self.desktop.escape=True;self.stable_tick();self.assertFalse(self.v.armed)
         self.desktop.escape=False;self.desktop.info['rect']=[1,0,421,420]
-        with self.assertRaises(ValueError):self.v.tick()
+        self.v.tick()
+        self.assertEqual(self.v.target['rect'],self.desktop.info['rect'])
         self.assertEqual(self.desktop.clicks,[])
+        self.desktop.info['pid']=2
+        with self.assertRaises(ValueError):self.v.tick()
+
+    def test_detect_grid_and_last_white_marker(self):
+        b=Board(9);b.play('B','D4');b.play('W','E5')
+        im=board_image(b)
+        ImageDraw.Draw(im).pieslice((172,172,208,208),0,90,fill=(25,25,25))
+        cfg=detect_board(im,9)
+        self.assertLess(abs(cfg['x0']-30),2)
+        self.assertEqual(recognize(im,cfg)['grid'],b.grid)
+        with self.assertRaises(ValueError):detect_board(Image.new('RGB',(420,420),'white'),9)
+
+    def test_one_action_starts_detection_and_automatic_play(self):
+        self.v.cfg=None;self.v.started=False
+        with patch('trainer.vision.threading.Thread'):
+            self.v.start(dict(size=9,color='B'))
+        self.assertTrue(self.v.armed)
+        self.stable_tick()
+        self.assertIsNotNone(self.v.cfg)
+        self.assertEqual(len(self.desktop.clicks),1)
+
+    def test_opening_white_reply_without_empty_frame(self):
+        self.desktop.board.play('B','E5')
+        self.v.ai='W';self.v.initialized=False;self.v.armed=True
+        self.stable_tick()
+        self.assertEqual(self.app.board.moves,[['B','E5']])
+        self.assertEqual(len(self.desktop.clicks),1)
+
+    def test_uncertain_frame_and_unavailable_capture_recover(self):
+        self.v.armed=True
+        with patch.object(self.desktop,'capture',side_effect=ValueError('Minimized')):self.v.tick()
+        self.assertTrue(self.v.armed)
+        obscured=board_image(Board(9));ImageDraw.Draw(obscured).rectangle((0,0,200,200),fill='blue')
+        with patch.object(self.desktop,'capture',return_value=(obscured,self.desktop.info)):self.stable_tick()
+        self.assertTrue(self.v.armed);self.assertFalse(self.desktop.clicks)
+        self.stable_tick();self.assertEqual(len(self.desktop.clicks),1)
+
+    def test_auto_detection_waits_and_recovers(self):
+        self.v.cfg=None;self.v.armed=True
+        with patch.object(self.desktop,'capture',return_value=(Image.new('RGB',(420,420),'white'),self.desktop.info)):
+            self.stable_tick()
+        self.assertTrue(self.v.armed);self.assertFalse(self.desktop.clicks)
+        self.stable_tick();self.assertEqual(len(self.desktop.clicks),1)
+
+    def test_resume_has_no_countdown(self):
+        self.v.pause();self.v.arm();self.stable_tick()
+        self.assertEqual(len(self.desktop.clicks),1)
     def test_bad_calibration(self):
         for data in (dict(size=9,x0=0,y0=0,x1=350,y1=350),dict(size=9,x0=30,y0=30,x1=50,y1=350)):
             with self.assertRaises(ValueError):calibration(data,420,420)

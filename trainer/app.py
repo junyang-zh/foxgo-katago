@@ -362,7 +362,6 @@ class Trainer:
             if name in ('vision-capture','vision-calibrate','vision-start') and v.started:
                 raise ValueError('Stop vision before changing calibration or restarting.')
             if name=='vision-capture':
-                time.sleep(3)  # Allows the user to bring FoxGo forward after pressing Capture.
                 v.capture(data['hwnd'])
             elif name=='vision-calibrate':v.configure(data)
             elif name=='vision-start':

@@ -1,5 +1,13 @@
 'use strict';
-let visionImage=null, visionCorners=[];
+let visionImage=null, visionCorners=[], visionLoading=false, visionLoadedAt=0;
+function loadVisionImage() {
+  if(visionLoading)return;
+  visionLoading=true;
+  const im=new Image();
+  im.onload=()=>{visionImage=im;vc.width=im.width;vc.height=im.height;visionLoading=false;visionLoadedAt=Date.now();drawVision();};
+  im.onerror=()=>{visionLoading=false;visionLoadedAt=Date.now();};
+  im.src='/api/vision-image?t='+Date.now();
+}
 const vc=document.getElementById('vision-canvas'), vx=vc.getContext('2d');
 function drawVision(s=state) {
   vx.clearRect(0,0,vc.width,vc.height);
@@ -23,18 +31,17 @@ $('vision-windows').onclick=async()=>{
   }
 };
 $('vision-capture').onclick=async()=>{
-  showNotice('Bring FoxGo to the foreground now; capturing in 3 seconds.');
   if(await action('vision-capture',{hwnd:Number($('vision-window').value)})){
-    visionCorners=[];visionImage=new Image();visionImage.onload=()=>{vc.width=visionImage.width;vc.height=visionImage.height;drawVision();};
-    visionImage.src='/api/vision-image?t='+Date.now();
+    visionCorners=[];loadVisionImage();
   }
 };
 $('vision-calibrate').onclick=()=>{
   if(visionCorners.length!==2){showNotice('Select both grid corners in the screenshot.',true);return;}
   action('vision-calibrate',{size:Number($('vision-size').value),x0:visionCorners[0].x,y0:visionCorners[0].y,x1:visionCorners[1].x,y1:visionCorners[1].y});
 };
-$('vision-start').onclick=()=>action('vision-start',{color:$('vision-color').value,komi:Number($('vision-komi').value)});
-$('vision-arm').onclick=()=>action('vision-arm');
+const startVision=()=>action('vision-start',{hwnd:Number($('vision-window').value),size:Number($('vision-size').value),color:$('vision-color').value,komi:Number($('vision-komi').value)});
+$('vision-start').onclick=startVision;
+$('vision-arm').onclick=()=>state?.vision?.running?action('vision-arm'):startVision();
 $('vision-pause').onclick=()=>action('vision-pause');
 $('vision-stop').onclick=()=>action('vision-stop');
 $('vision-pass').onclick=()=>{if(confirm('Confirm that the player whose turn is shown actually passed in FoxGo?'))action('vision-pass');};
@@ -43,9 +50,11 @@ window.renderVision=s=>{
   $('vision-badge').textContent=v.armed?'Automatic moves enabled':running?'Preview / paused':'Stopped';
   $('vision-status').textContent=[v.status,v.confidence!==undefined?`Minimum confidence ${(v.confidence*100).toFixed(0)}%`:'',v.pendingMove?`Pending ${v.pendingMove}`:''].filter(Boolean).join(' · ');
   for(const id of ['vision-windows','vision-capture','vision-calibrate'])$(id).disabled=pending||running||s.mode==='online';
-  $('vision-start').disabled=pending||running||!v.calibration||!s.engine||s.mode==='online';
-  $('vision-arm').disabled=pending||!running||v.armed;
+  $('vision-start').disabled=pending||running||!s.engine||s.mode==='online';
+  $('vision-arm').disabled=pending||v.armed||!s.engine||s.mode==='online';
+  $('vision-arm').textContent=v.armed?'Automatic moves enabled':running?'Resume automatic moves':'Enable automatic moves';
   $('vision-pause').disabled=!running;$('vision-stop').disabled=pending||!running;
   $('vision-pass').disabled=pending||!running||v.armed||!!v.pendingMove;
+  if(running&&Date.now()-visionLoadedAt>900)loadVisionImage();
   drawVision(s);
 };

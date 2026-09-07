@@ -8,6 +8,44 @@ import time
 from .board import Board, LETTERS, point
 
 
+def detect_board(image, size=19):
+    """Locate two matching, regularly spaced sets of long dark grid lines."""
+    scale=min(1,900/max(image.size))
+    small=image.convert('RGB').resize((round(image.width*scale),round(image.height*scale)))
+    w,h=small.size;cols=[0]*w;pixels=small.load()
+    def wood(rgb):
+        r,g,b=rgb
+        return r>120 and r>b+25 and g>b+15
+    for y in range(h):
+        for x in range(3,w-3):
+            if max(pixels[x,y])<160 and wood(pixels[x-3,y]) and wood(pixels[x+3,y]):cols[x]+=1
+    def lattices(values, threshold):
+        peaks=[];group=[]
+        for i,v in enumerate(values+[0]):
+            if v>=threshold:group.append(i)
+            elif group:
+                peaks.append(max(group,key=lambda p:values[p]));group=[]
+        candidates=[]
+        for a in peaks:
+            for b in peaks:
+                step=(b-a)/(size-1)
+                if step<12*scale:continue
+                error=sum(min(abs(p-(a+i*step)) for p in peaks) for i in range(size))
+                if error<size*1.2:candidates.append((error,a,b,step))
+        return sorted(candidates)[:12]
+    for _,x0,x1,dx in lattices(cols,h*.18):
+        # Exclude side panels: their dark backgrounds can merge horizontal peaks.
+        rows=[sum(max(small.getpixel((x,y)))<160 for x in range(x0,x1+1)) for y in range(h)]
+        for _,y0,y1,dy in lattices(rows,(x1-x0)*.65):
+            if abs(dx-dy)>max(1,dx*.025):continue
+            try:
+                cfg=calibration(dict(size=size,x0=x0/scale,y0=y0/scale,x1=x1/scale,y1=y1/scale),*image.size)
+                result=recognize(image,cfg)
+                if len(result['uncertain'])<=size:return cfg
+            except ValueError:pass
+    raise ValueError('Waiting for a visible standard yellow FoxGo board to detect its grid.')
+
+
 def calibration(data, width, height):
     size=int(data.get('size',19))
     if size not in (9,13,19):raise ValueError('Use a 9, 13 or 19 line board.')
@@ -38,6 +76,8 @@ def recognize(image, cfg):
                 elif min(r,g,b)>145 and max(r,g,b)-min(r,g,b)<48:counts['W']+=1
                 elif r>b+25 and g>b+15 and r>120:counts['']+=1
             value=max(counts,key=counts.get);score=counts[value]/32
+            # FoxGo draws a black quarter-sector over the last white stone.
+            if value=='W' and counts['W']>=20 and counts['W']+counts['B']>=30:score=.9
             if value in ('B','W'):
                 # A flat dialog/menu patch is not a stone: require surrounding wood.
                 wood=0
@@ -98,31 +138,43 @@ class VisionConnector:
         with self.guard:self.cfg=cfg;self.status={**result,'status':'Check detected stones before starting'}
 
     def start(self,data):
-        if not self.cfg:raise ValueError('Calibrate the board first.')
+        if self.thread and self.thread.is_alive():raise ValueError('Previous vision worker is still stopping.')
+        size=int(data.get('size',19))
+        if size not in (9,13,19):raise ValueError('Use a 9, 13 or 19 line board.')
+        if not self.cfg:
+            windows=self.desktop.windows()
+            if not windows:raise ValueError('Open a FoxGo game window first.')
+            selected=next((w for w in windows if w['hwnd']==int(data.get('hwnd') or 0)),None)
+            if selected is None:
+                active=[w for w in windows if w.get('active')]
+                choices=active or windows
+                if len(choices)!=1:raise ValueError('Several FoxGo windows found; select the game window first.')
+                selected=choices[0]
+            self.target=selected
         ai=data.get('color','W');komi=float(data.get('komi',7.5))
         if ai not in ('B','W') or not math.isfinite(komi) or abs(komi)>100:raise ValueError('Invalid color or komi.')
         self.app.require_engine()
-        board=Board(self.cfg['size'],komi,'chinese')
+        board=Board(self.cfg['size'] if self.cfg else size,komi,'chinese')
         self.app.reset_engine(board);self.app.commit_board(board)
         self.app.analysis={};self.app.evaluations={};self.app.analyses={}
-        self.ai=ai;self.started=True;self.initialized=False;self.armed=False;self.room=None
+        self.ai=ai;self.started=True;self.initialized=False;self.armed=True;self.room=None
         self.stopped.clear();self.cancel.clear();self.last=None;self.stable=0;self.pending=None
-        self.status={'status':'Waiting for a stable empty board; bring FoxGo forward'}
+        self.status={'status':'Reading FoxGo continuously · automatic moves enabled'}
         self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
 
     def arm(self):
         with self.guard:
-            if not self.started or not self.initialized:raise ValueError('Start tracking from a stable empty board first.')
+            if not self.started:raise ValueError('Start tracking first.')
             if self.pending:raise ValueError('Wait for the pending move to be confirmed.')
             self.cancel.clear();self.armed=True
-            self.arm_after=time.monotonic()+3
-            self.status['status']='Bring FoxGo forward within 3 seconds'
+            self.status['status']='Reading FoxGo continuously · automatic moves enabled'
 
     def pause(self,reason='Paused'):
         with self.guard:self.armed=False;self.cancel.set();self.status['status']=reason
 
     def stop(self):
         self.pause('Stopped');self.stopped.set();self.started=False
+        if self.thread and self.thread is not threading.current_thread():self.thread.join(timeout=10)
 
     def manual_pass(self):
         # Board images cannot distinguish a pass from a player still thinking.
@@ -133,23 +185,31 @@ class VisionConnector:
 
     def tick(self):
         if self.desktop.emergency():self.pause('Escape pressed');return
-        if self.armed and time.monotonic()<self.arm_after:return
-        image,info=self.desktop.capture(self.target['hwnd'])
-        if info['pid']!=self.target['pid'] or info['rect']!=self.target['rect']:
-            raise ValueError('Window moved, resized or replaced; stop and recalibrate.')
+        try:image,info=self.desktop.capture(self.target['hwnd'])
+        except (ValueError,OSError) as exc:
+            self.last=None;self.stable=0;self.status['status']=str(exc);return
+        if info['pid']!=self.target['pid']:
+            raise ValueError('FoxGo process was replaced; restart tracking.')
+        out=io.BytesIO();image.save(out,format='PNG');self.preview=out.getvalue()
+        if not self.cfg or image.size!=(self.cfg['width'],self.cfg['height']):
+            try:self.cfg=detect_board(image,self.app.board.size)
+            except ValueError as exc:
+                self.status['status']=str(exc);return
+            self.last=None;self.stable=0
+        self.target=info
         result=recognize(image,self.cfg)
         with self.guard:self.status.update(result)
         if result['uncertain']:
             self.last=None;self.stable=0
-            raise ValueError('Uncertain intersections: '+', '.join(result['uncertain'][:8]))
+            self.status['status']='Waiting for clear intersections: '+', '.join(result['uncertain'][:8]);return
         grid=result['grid']
         if grid==self.last:self.stable+=1
         else:self.last=deepcopy(grid);self.stable=1
         if self.stable<3:return
         if not self.initialized:
-            if any(c for row in grid for c in row):
+            if any(c for row in grid for c in row) and info.get('moveNumber')!=1:
                 self.status['status']='Start a fresh empty game; mid-game history cannot be inferred';return
-            self.initialized=True;self.status['status']='Empty board verified · preview only';return
+            self.initialized=True;self.status['status']='Board verified'
         if self.pending:
             following=None
             if grid!=self.pending.grid and grid!=self.app.board.grid:
@@ -171,7 +231,7 @@ class VisionConnector:
         if self.app.board.result:self.pause('Game ended locally; verify result in FoxGo');return
         if not self.armed or self.app.board.turn!=self.ai:return
         if not info.get('active') or not info.get('room'):
-            raise ValueError('FoxGo title does not indicate an active match; auto-play paused.')
+            self.status['status']='Waiting for an active FoxGo match';return
         if self.room and info['room']!=self.room:
             raise ValueError('Different game room; stop and start tracking a fresh game.')
         if info.get('moveNumber')!=len(self.app.board.moves):
@@ -191,10 +251,15 @@ class VisionConnector:
         move=match[1].upper()
         if move in ('PASS','RESIGN'):
             self.pause('KataGo recommends '+move+'; perform it in FoxGo manually, then confirm pass or stop tracking.');return
+        if hasattr(self.desktop,'prepare_click'):
+            try:self.desktop.prepare_click(self.target['hwnd'])
+            except ValueError as exc:
+                self.status['status']=str(exc);return
         fresh,new_info=self.desktop.capture(self.target['hwnd'])
         check=recognize(fresh,self.cfg)
         if new_info!=info or check['grid']!=grid or check['uncertain']:
-            raise ValueError('Board or window changed during search; click cancelled.')
+            self.last=None;self.stable=0
+            self.status['status']='Board changed during search; reading again';return
         candidate=deepcopy(self.app.board);candidate.play(self.ai,move)
         x,y=point(move,candidate.size)
         with self.guard:
