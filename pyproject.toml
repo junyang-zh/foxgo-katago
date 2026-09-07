@@ -1,0 +1,6 @@
+[project]
+name = "foxgo-katago"
+version = "1.0.0"
+description = "Local personal Go trainer and official FoxGTP bridge for KataGo"
+requires-python = ">=3.10"
+dependencies = []

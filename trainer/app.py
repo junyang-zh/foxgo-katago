@@ -1,0 +1,373 @@
+"""Application state. All engine mutations share one operation lock."""
+from copy import deepcopy
+from collections import deque
+from pathlib import Path
+import json
+import math
+import re
+import threading
+import time
+
+from .board import Board, color, point
+from .gtp import GTP, EngineError
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class Trainer:
+    def __init__(self, data_dir=None):
+        self.data_dir = Path(data_dir or ROOT / 'data')
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.operation = threading.Lock()
+        self.state_lock = threading.RLock()
+        self.engine = None
+        self.board = Board()
+        self.logs = deque(maxlen=300)
+        self.analysis = {}
+        self.evaluations = {}
+        self.analyses = {}
+        self.busy = ''
+        self.mode = 'local'
+        self.fox_connected = False
+        self.fox_ready = False
+        self.fox_server = None
+        self.fox_port = 8001
+        self.settings = dict(executable='', model='', config=str(ROOT/'config'/'gtp.cfg'),
+                             visits=200, seconds=2.0, aiColor='W')
+        self.revision = 0
+        saved = self.data_dir / 'settings.json'
+        if saved.exists():
+            try:
+                self.settings.update(json.loads(saved.read_text('utf-8')))
+            except (OSError, ValueError):
+                self.log('warning', 'Could not read settings.json; using defaults.')
+        session = self.data_dir / 'session.json'
+        if session.exists():
+            try:
+                data = json.loads(session.read_text('utf-8'))
+                b = Board(data['size'], data['komi'], data['rules'])
+                b.setup(data.get('handicap', []))
+                for c,v in data['moves']:
+                    b.play(c,v)
+                b.result = data.get('result', '')
+                self.board = b
+                self.evaluations = {int(k):v for k,v in data.get('evaluations', {}).items()}
+                self.analyses = {int(k):v for k,v in data.get('analyses', {}).items()}
+            except (KeyError, ValueError, OSError):
+                self.log('warning', 'Could not restore the saved game.')
+        self.log('info', 'Local trainer ready. Connect KataGo for AI play and analysis.')
+
+    def log(self, level, message):
+        with self.state_lock:
+            self.logs.append(dict(time=time.strftime('%H:%M:%S'), level=level, message=str(message)[:4000]))
+
+    def state(self):
+        with self.state_lock:
+            b = self.board
+            return deepcopy(dict(size=b.size, komi=b.komi, rules=b.rules, grid=b.grid,
+                turn=b.turn, moves=b.moves, handicap=b.handicap, captures=b.captures,
+                result=b.result, history=b.history, analysis=self.analysis,
+                evaluations=self.evaluations, analyses=self.analyses, logs=list(self.logs), busy=self.busy,
+                mode=self.mode, engine=bool(self.engine and self.engine.alive),
+                settings=self.settings, foxConnected=self.fox_connected,
+                foxReady=self.fox_ready, foxPort=self.fox_port, revision=self.revision))
+
+    def save(self):
+        with self.state_lock:
+            b = self.board
+            data = dict(size=b.size, komi=b.komi, rules=b.rules, moves=b.moves,
+                        handicap=b.handicap, result=b.result, evaluations=self.evaluations, analyses=self.analyses)
+            for name, value in (('session', data), ('settings', self.settings)):
+                tmp = self.data_dir / (name + '.tmp')
+                tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+                tmp.replace(self.data_dir / (name + '.json'))
+
+    def require_engine(self):
+        if not self.engine or not self.engine.alive:
+            raise EngineError('Connect KataGo in Engine settings first.')
+        return self.engine
+
+    def reset_engine(self, board):
+        engine = self.require_engine()
+        engine.command('clear_board')
+        engine.command(f'boardsize {board.size}')
+        engine.command(f'komi {board.komi}')
+        engine.command(f'kata-set-rules {board.rules}')
+        if board.handicap:
+            engine.command('set_free_handicap ' + ' '.join(board.handicap))
+        for c,v in board.moves:
+            if v != 'RESIGN':
+                engine.command(f'play {c} {v}')
+
+    def connect_engine(self, data):
+        settings = {**self.settings, **{k:data[k] for k in self.settings if k in data}}
+        for key in ('executable', 'model', 'config'):
+            path = Path(settings[key]).expanduser()
+            if not path.is_file():
+                raise ValueError(f'{key.title()} file does not exist: {path}')
+            settings[key] = str(path.resolve())
+        settings['visits'] = int(settings['visits'])
+        settings['seconds'] = float(settings['seconds'])
+        if not 1 <= settings['visits'] <= 100000 or not .1 <= settings['seconds'] <= 60:
+            raise ValueError('Use 1–100000 visits and 0.1–60 seconds per search.')
+        if settings['aiColor'] not in ('B','W','none'):
+            raise ValueError('Choose Black, White, or manual AI replies.')
+        if self.engine:
+            self.engine.close()
+            self.engine = None
+        command = [settings['executable'], 'gtp', '-model', settings['model'],
+            '-config', settings['config'], '-override-config',
+            f'maxVisits={settings["visits"]},maxTime={settings["seconds"]},reportAnalysisWinratesAs=SIDETOMOVE,ponderingEnabled=false']
+        # First OpenCL launch can compile and tune kernels for several minutes.
+        engine = GTP(command, self.log, timeout=600)
+        self.engine = engine
+        try:
+            name = engine.command('name')
+            engine.timeout = 120
+            version = engine.command('version')
+            if engine.command('known_command kata-search_analyze').strip() != 'true':
+                raise EngineError('This engine must support KataGo kata-search_analyze.')
+            self.reset_engine(self.board)
+        except Exception:
+            engine.close()
+            self.engine = None
+            raise
+        self.settings = settings
+        self.log('info', f'Connected {name} {version}.')
+
+    def receive_analysis(self, analysis):
+        with self.state_lock:
+            turn, move = self.board.turn, len(self.board.moves)
+            analysis.update(turn=turn, moveNumber=move)
+            root = analysis.get('root', {})
+            if 'winrate' in root and ('scoreLead' in root or 'scoreMean' in root):
+                wr = float(root['winrate'])
+                score = float(root.get('scoreLead', root.get('scoreMean', 0)))
+                self.evaluations[move] = dict(move=move,
+                    blackWinrate=wr if turn == 'B' else 1-wr,
+                    blackScore=score if turn == 'B' else -score,
+                    visits=root.get('visits', 0))
+            self.analysis = analysis
+            self.analyses[move] = deepcopy(analysis)
+
+    def analyze(self):
+        if self.board.result:
+            return
+        self.require_engine().command(
+            f'kata-search_analyze {self.board.turn} 25 maxmoves 8 rootInfo true ownership true',
+            self.receive_analysis)
+
+    def commit_board(self, board):
+        with self.state_lock:
+            self.board = board
+            self.analysis = {}
+            self.revision += 1
+
+    def play(self, c, vertex):
+        candidate = deepcopy(self.board)
+        candidate.play(c, vertex)
+        if self.engine and self.engine.alive and str(vertex).upper() != 'RESIGN':
+            self.engine.command(f'play {c} {vertex}')
+        self.commit_board(candidate)
+
+    def generate(self, c=None):
+        c = color(c or self.board.turn)
+        # FoxGTP can explicitly request either color after recovery or setup.
+        with self.state_lock:
+            self.board.turn = c
+        reply = self.require_engine().command(
+            f'kata-genmove_analyze {c} 25 maxmoves 8 rootInfo true ownership true',
+            self.receive_analysis)
+        match = re.search(r'^play (\S+)\s*$', reply, re.M)
+        if not match:
+            self.engine.close()
+            raise EngineError('Missing generated move; stopped engine to prevent desynchronization.')
+        vertex = match[1].upper()
+        candidate = deepcopy(self.board)
+        try:
+            candidate.play(c,vertex, authoritative=True)
+        except ValueError:
+            self.engine.close()
+            raise EngineError('Generated move could not be mirrored; engine stopped.')
+        self.commit_board(candidate)
+        return vertex.lower() if vertex in ('PASS','RESIGN') else vertex
+
+    def action(self, name, data):
+        if not self.operation.acquire(timeout=.25):
+            raise ValueError('An operation is in progress. Wait for it to finish.')
+        self.busy = name
+        try:
+            if self.mode == 'online' and name not in ('fox-stop',):
+                raise ValueError('Stop the FoxGTP bridge before changing the engine or local game.')
+            if name == 'engine-connect':
+                self.connect_engine(data)
+                self.analyze()
+            elif name == 'engine-stop':
+                if self.engine:
+                    self.engine.close()
+                self.engine = None
+                self.analysis = {}
+            elif name == 'new':
+                size, komi = int(data.get('size',19)), float(data.get('komi',7.5))
+                rules = data.get('rules','chinese')
+                if not math.isfinite(komi) or not -100 <= komi <= 100 or rules not in ('chinese','japanese'):
+                    raise ValueError('Invalid rules or komi.')
+                board = Board(size,komi,rules)
+                handicap = int(data.get('handicap',0))
+                if not 0 <= handicap <= 9 or handicap == 1:
+                    raise ValueError('Use 0 or 2–9 handicap stones.')
+                if self.engine and self.engine.alive:
+                    try:
+                        self.reset_engine(board)
+                        if handicap:
+                            vertices = self.engine.command(f'fixed_handicap {handicap}').split()
+                            board.setup(vertices)
+                    except Exception:
+                        self.engine.close()
+                        raise
+                elif handicap:
+                    raise ValueError('Connect KataGo to place handicap stones.')
+                self.commit_board(board)
+                self.evaluations = {}
+                self.analyses = {}
+                if self.engine and self.engine.alive:
+                    if self.settings['aiColor'] == self.board.turn:
+                        self.generate()
+                    self.analyze()
+            elif name in ('play','pass','resign'):
+                if self.board.result:
+                    raise ValueError('The game has ended. Undo or start a new game.')
+                vertex = data.get('vertex','') if name == 'play' else name
+                self.play(self.board.turn, str(vertex).upper())
+                if self.engine and self.engine.alive and not self.board.result:
+                    if self.settings['aiColor'] == self.board.turn:
+                        self.generate()
+                    self.analyze()
+            elif name == 'genmove':
+                if self.board.result:
+                    raise ValueError('The game has ended.')
+                self.generate()
+                self.analyze()
+            elif name == 'analyze':
+                self.analyze()
+            elif name == 'undo':
+                count = 2 if data.get('pair') and len(self.board.moves) >= 2 else 1
+                candidate = deepcopy(self.board)
+                for _ in range(count):
+                    candidate.undo()
+                if self.engine and self.engine.alive:
+                    # Replay also handles resignation, which never entered engine history.
+                    try:
+                        self.reset_engine(candidate)
+                    except Exception:
+                        self.engine.close()
+                        raise
+                self.commit_board(candidate)
+                self.evaluations = {k:v for k,v in self.evaluations.items() if k <= len(candidate.moves)}
+                self.analyses = {k:v for k,v in self.analyses.items() if k <= len(candidate.moves)}
+                if self.engine and self.engine.alive:
+                    self.analyze()
+            elif name == 'score':
+                score = self.require_engine().command('final_score')
+                with self.state_lock:
+                    self.board.result = score
+                    self.board.history[-1]['result'] = score
+                self.log('score', score)
+            elif name == 'fox-start':
+                from .fox import FoxServer
+                self.require_engine()
+                port = int(data.get('port',8001))
+                if not 1024 <= port <= 65535:
+                    raise ValueError('Choose a TCP port from 1024 to 65535.')
+                server = FoxServer(self, port)
+                try:
+                    self.engine.command('kata-set-rules chinese')
+                except Exception:
+                    server.stop()
+                    raise
+                self.board.rules = 'chinese'
+                self.analysis = {}
+                self.evaluations = {}
+                self.analyses = {}
+                self.fox_server, self.fox_port = server, port
+                self.mode = 'online'
+                server.start()
+                self.log('fox', f'Listening on 127.0.0.1:{port}; waiting for official FoxGTP.')
+            elif name == 'fox-stop':
+                if self.fox_server:
+                    self.fox_server.stop()
+                self.fox_server = None
+                self.mode = 'local'
+                self.fox_connected = self.fox_ready = False
+                self.log('fox', 'Bridge stopped. Local controls enabled.')
+            else:
+                raise ValueError('Unknown action.')
+            self.save()
+        except Exception as exc:
+            self.log('error', str(exc))
+            raise
+        finally:
+            self.busy = ''
+            self.operation.release()
+        return self.state()
+
+    def fox_command(self, command):
+        """Called with operation lock held. Never inject review searches into Fox time."""
+        fields = command.split()
+        if not fields:
+            raise ValueError('Empty command.')
+        verb, args = fields[0].lower(), fields[1:]
+        allowed = {'protocol_version','name','version','list_commands','known_command','quit',
+                   'clear_board','boardsize','komi','time_settings','time_left','set_free_handicap',
+                   'play','genmove','final_score','showboard'}
+        if verb not in allowed:
+            raise ValueError('unknown command')
+        if verb == 'quit':
+            return ''
+        if verb == 'list_commands':
+            return '\n'.join(sorted(allowed))
+        if verb == 'known_command':
+            return 'true' if len(args) == 1 and args[0] in allowed else 'false'
+        if verb in ('play','genmove','set_free_handicap') and not self.fox_ready:
+            raise ValueError('Send clear_board before starting or restoring a game.')
+        engine = self.require_engine()
+        if verb == 'genmove':
+            if len(args) != 1:
+                raise ValueError('genmove requires a color')
+            return self.generate(args[0])
+        candidate = None
+        if verb == 'boardsize':
+            candidate = Board(int(args[0]),self.board.komi,self.board.rules)
+        elif verb == 'clear_board':
+            candidate = Board(self.board.size,self.board.komi,self.board.rules)
+        elif verb == 'komi':
+            value = float(args[0])
+            if not math.isfinite(value) or abs(value) > 100:
+                raise ValueError('Invalid komi')
+            candidate = deepcopy(self.board)
+            candidate.komi = value
+        elif verb == 'set_free_handicap':
+            candidate = deepcopy(self.board)
+            candidate.setup([v.upper() for v in args])
+        elif verb == 'play':
+            if len(args) != 2:
+                raise ValueError('play requires color and vertex')
+            candidate = deepcopy(self.board)
+            candidate.play(color(args[0]),args[1], authoritative=True)
+        response = engine.command(command)
+        if candidate:
+            self.commit_board(candidate)
+        if verb in ('clear_board','boardsize','komi','set_free_handicap'):
+            self.evaluations = {}
+            self.analyses = {}
+        if verb == 'clear_board':
+            self.fox_ready = True
+        if verb == 'final_score':
+            self.log('fox score', response)
+        return response
+
+    def close(self):
+        if self.fox_server:
+            self.fox_server.stop()
+        if self.engine:
+            self.engine.close()
