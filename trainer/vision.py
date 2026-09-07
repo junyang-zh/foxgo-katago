@@ -207,9 +207,18 @@ class VisionConnector:
         else:self.last=deepcopy(grid);self.stable=1
         if self.stable<3:return
         if not self.initialized:
-            if any(c for row in grid for c in row) and info.get('moveNumber')!=1:
-                self.status['status']='Start a fresh empty game; mid-game history cannot be inferred';return
+            number=info.get('moveNumber')
+            if not isinstance(number,int) or number<0:
+                self.status['status']='Waiting for FoxGo’s move counter to identify the turn';return
+            if number>1:
+                stones=[[c,LETTERS[x]+str(self.app.board.size-y)] for y,row in enumerate(grid) for x,c in enumerate(row) if c]
+                candidate=Board(self.app.board.size,self.app.board.komi,self.app.board.rules)
+                candidate.setup_position(stones,'B' if number%2==0 else 'W',number)
+                self.app.reset_engine(candidate);self.app.commit_board(candidate)
+                self.status['historyNote']=f'Attached at move {number}; earlier moves, captures and ko history are unknown.'
+                self.app.log('vision',self.status['historyNote'])
             self.initialized=True;self.status['status']='Board verified'
+            self.room=info.get('room') if info.get('active') else None
         if self.pending:
             following=None
             if grid!=self.pending.grid and grid!=self.app.board.grid:
@@ -238,7 +247,7 @@ class VisionConnector:
             self.status['status']='Waiting for an active FoxGo match';return
         if self.room and info['room']!=self.room:
             raise ValueError('Different game room; stop and start tracking a fresh game.')
-        if info.get('moveNumber')!=len(self.app.board.moves):
+        if info.get('moveNumber')!=self.app.board.move_offset+len(self.app.board.moves):
             raise ValueError('FoxGo move counter disagrees with tracked history; check for a pass or missed move.')
         self.room=info['room']
         # Search does not mutate the engine board; the click must be confirmed.

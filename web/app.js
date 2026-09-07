@@ -120,13 +120,13 @@ function renderChart() {
   $('winrate').textContent=current?`${(current.blackWinrate*100).toFixed(1)}%`:'—';
   $('score').textContent=current?`${current.blackScore>=0?'B':'W'} +${Math.abs(current.blackScore).toFixed(1)}`:'—';
   $('win-fill').style.width=`${current?current.blackWinrate*100:50}%`;
-  $('chart-caption').textContent=samples.length?`${samples.length} evaluated positions · Black perspective`:'Analysis appears after a KataGo search.';
+  $('chart-caption').textContent=samples.length?`${samples.length} evaluated positions · Black perspective${state.moveOffset?` · tracked from move ${state.moveOffset}`:''}`:'Analysis appears after a KataGo search.';
   const previous=state.evaluations[atMove()-1], last=state.moves[atMove()-1];
   $('feedback').textContent=current&&previous&&last?`${last[0]==='B'?'Black':'White'} ${last[1]}: ${((previous.blackScore-current.blackScore)*(last[0]==='B'?1:-1)).toFixed(1)} estimated points lost. Compare candidate continuations.`:'Move the timeline to review earlier positions. Dots mark evaluated positions; lines connect samples.';
 }
 function renderChoices() {
   const a=currentAnalysis(), choices=a.choices||[], box=$('choices'); box.replaceChildren();
-  $('choice-turn').textContent=a.turn?`${a.turn==='B'?'Black':'White'} to play · #${a.moveNumber}`:'No analysis';
+  $('choice-turn').textContent=a.turn?`${a.turn==='B'?'Black':'White'} to play · #${a.moveNumber+(state.moveOffset||0)}`:'No analysis';
   $('visits').textContent=a.root?`${Math.round(a.root.visits||0).toLocaleString()} visits`:state.engine?'Ready':'Awaiting engine';
   if(!choices.length) {const p=document.createElement('p');p.className='empty';p.textContent=state.engine?'No candidate analysis for this position. Analyze the live board, or wait for the next AI search.':'Connect KataGo to explore candidate moves, winrates and continuations.';box.append(p);}
   choices.slice(0,5).forEach((c,i)=>{
@@ -161,19 +161,20 @@ function render() {
   $('engine-dot').classList.toggle('on',state.engine);
   $('mode-label').textContent=state.mode==='vision'?'FOXGO · SCREEN CONNECTOR':state.mode==='online'?'FOXGO · ONLINE OBSERVER':'LOCAL PRACTICE';
   const snap=state.history[atMove()]||state.history.at(-1);
+  const aiColor=state.mode==='vision'?state.vision.aiColor:state.mode==='online'?state.foxGame?.aiColor:state.settings.aiColor;
   $('turn-label').textContent=state.result&&reviewing===null?state.result:`${snap.turn==='B'?'Black':'White'} to play`;
-  $('black-info').textContent=`${snap.captures.B} captures${state.settings.aiColor==='B'?' · AI':''}`;
-  $('white-info').textContent=`${snap.captures.W} captures${state.settings.aiColor==='W'?' · AI':''}`;
+  $('black-info').textContent=`${snap.captures.B} captures${state.moveOffset?' since attachment':''}${aiColor==='B'?' · AI':''}`;
+  $('white-info').textContent=`${snap.captures.W} captures${state.moveOffset?' since attachment':''}${aiColor==='W'?' · AI':''}`;
   $('game-meta').textContent=`${state.size} × ${state.size} · ${state.rules==='chinese'?'Chinese':'Japanese'} · Komi ${state.komi}`;
   $('history').max=state.moves.length; $('history').value=atMove();
-  $('move-number').textContent=`Move ${atMove()} / ${state.moves.length}`;
+  $('move-number').textContent=`Move ${atMove()+(state.moveOffset||0)} / ${state.moves.length+(state.moveOffset||0)}`;
   $('fox-status').textContent=state.foxConnected?((state.connector==='foxgtp'?'FoxGTP':'FoxGo')+(state.foxReady?' synced':' connected')):state.mode==='online'?'Listening':'Offline';
   $('fox-toggle').textContent=state.mode==='online'?'Stop listener':'Start listener';
   const fg=state.connector==='foxgtp'&&state.mode==='online'?{status:state.foxConnected?(state.foxReady?'FoxGTP game synchronized':'FoxGTP connected · waiting for game commands'):'Waiting for FoxGTP on the engine port'}:state.foxGame||{};
   $('fox-detail').textContent=[fg.status,fg.aiColor?`AI ${fg.aiColor} · main ${fg.mainTime}s · byo ${fg.byoTime}s × ${fg.periods}`:'',fg.pendingMove?`Awaiting confirmation: ${fg.pendingMove}`:''].filter(Boolean).join(' · ');
   if(state.mode==='online') {$('fox-reserve').value=state.foxReserve;$('fox-port').value=state.foxPort;$('connector-type').value=state.connector;}
   renderBoard();renderChart();renderChoices();renderControls();renderLogs();
-  if(!lastNotice&&!pending) showNotice(state.busy?`Working: ${state.busy}…`:reviewing!==null?'Review mode. Return to Live to play.':state.mode==='online'?'Online observer: FoxGo controls the game.':state.result||(!state.engine?'Two-player practice is available. Connect KataGo for AI play and analysis.':'Click an intersection to play. Candidate numbers show KataGo’s preferred moves.'));
+  if(!lastNotice&&!pending) showNotice(state.busy?`Working: ${state.busy}…`:reviewing!==null?'Review mode. Return to Live to play.':state.mode==='online'?'Online observer: FoxGo controls the game.':state.mode==='vision'?(state.vision.status||'Reading FoxGo…'):state.result||(!state.engine?'Two-player practice is available. Connect KataGo for AI play and analysis.':'Click an intersection to play. Candidate numbers show KataGo’s preferred moves.'));
 }
 function renderLogs() {
   const box=$('logs'), bottom=box.scrollTop+box.clientHeight>=box.scrollHeight-25;

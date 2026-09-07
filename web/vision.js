@@ -26,7 +26,7 @@ $('vision-pass').onclick=()=>{if(confirm('Confirm that the player whose turn is 
 window.renderVision=s=>{
   const v=s.vision||{}, running=!!v.running;
   $('vision-badge').textContent=v.armed?'Automatic moves enabled':running?'Preview / paused':'Stopped';
-  $('vision-status').textContent=[v.status,v.confidence!==undefined?`Minimum confidence ${(v.confidence*100).toFixed(0)}%`:'',v.pendingMove?`Pending ${v.pendingMove}`:''].filter(Boolean).join(' · ');
+  $('vision-status').textContent=[v.status,v.historyNote,v.confidence!==undefined?`Minimum confidence ${(v.confidence*100).toFixed(0)}%`:'',v.pendingMove?`Pending ${v.pendingMove}`:''].filter(Boolean).join(' · ');
   $('vision-role').textContent=v.roleStatus||'Waiting to identify your account in FoxGo';
   $('vision-start').disabled=pending||running||s.mode==='online';
   $('vision-arm').disabled=pending||v.armed||s.mode==='online';

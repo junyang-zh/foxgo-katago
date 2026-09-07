@@ -174,6 +174,44 @@ class VisionTests(unittest.TestCase):
         with patch.object(self.app,'ensure_engine') as start:
             with self.assertRaises(RuntimeError):self.v.start({})
         start.assert_not_called()
+
+    def test_attach_midgame_syncs_position_and_plays(self):
+        self.desktop.board.play('B','E5');self.desktop.board.play('W','F5')
+        self.v.initialized=False;self.v.armed=True
+        self.stable_tick()
+        self.assertEqual(self.app.board.grid,self.desktop.board.grid)
+        self.assertEqual(self.app.board.move_offset,2)
+        self.assertEqual(self.app.state()['history'][0]['grid'],self.desktop.board.grid)
+        self.assertEqual(self.app.board.moves,[])
+        self.assertTrue(any(c.startswith('set_position ') for c in self.app.engine.commands))
+        self.assertEqual(len(self.desktop.clicks),1)
+        self.desktop.board.play('B','D4');self.stable_tick()
+        self.assertEqual(self.app.board.moves,[['B','D4']])
+        self.v.pause()
+        self.desktop.board.play('W','F6');self.stable_tick()
+        self.assertEqual(self.app.board.grid,self.desktop.board.grid)
+
+    def test_snapshot_survives_save_and_exports_as_setup(self):
+        self.app.board.setup_position([['B','E5'],['W','F5']],'B',24)
+        self.app.board.play('B','D4');self.app.save()
+        restored=Trainer(self.tmp.name)
+        self.assertEqual(restored.board.grid,self.app.board.grid)
+        self.assertEqual(restored.board.move_offset,24)
+        sgf=restored.board.sgf()
+        self.assertIn('AB[ee]',sgf);self.assertIn('AW[fe]',sgf);self.assertIn('PL[B]',sgf)
+        self.assertEqual(restored.board.moves,[['B','D4']])
+        restored.close()
+
+    def test_snapshot_odd_move_waits_for_white(self):
+        for c,v in [('B','E5'),('W','F5'),('B','D5')]:self.desktop.board.play(c,v)
+        self.v.initialized=False;self.v.armed=True;self.stable_tick()
+        self.assertEqual(self.app.board.turn,'W');self.assertFalse(self.desktop.clicks)
+
+    def test_snapshot_without_counter_never_guesses_turn(self):
+        self.v.initialized=False;self.v.armed=True
+        with patch.object(self.desktop,'capture',return_value=(board_image(Board(9)),{**self.desktop.info,'moveNumber':None})):
+            self.stable_tick()
+        self.assertFalse(self.v.initialized);self.assertFalse(self.desktop.clicks)
     def test_bad_calibration(self):
         for data in (dict(size=9,x0=0,y0=0,x1=350,y1=350),dict(size=9,x0=30,y0=30,x1=50,y1=350)):
             with self.assertRaises(ValueError):calibration(data,420,420)

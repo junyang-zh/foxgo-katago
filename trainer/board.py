@@ -35,6 +35,9 @@ class Board:
         self.turn = 'B'
         self.moves = []
         self.handicap = []
+        self.initial_stones = []
+        self.initial_turn = 'B'
+        self.move_offset = 0
         self.captures = {'B': 0, 'W': 0}
         self.result = ''
         self.history = [self.snapshot()]
@@ -112,6 +115,21 @@ class Board:
         fresh.history = [fresh.snapshot()]
         self.__dict__.update(fresh.__dict__)
 
+    def setup_position(self, stones, turn, move_offset=0):
+        """Import a position without inventing the moves that produced it."""
+        fresh=Board(self.size,self.komi,self.rules)
+        if not isinstance(move_offset,int) or move_offset<0:raise ValueError('Invalid snapshot move number.')
+        for c,v in stones:
+            c=color(c);x,y=point(v,self.size)
+            if fresh.grid[y][x]:raise ValueError('Duplicate setup stone.')
+            fresh.grid[y][x]=c;fresh.initial_stones.append([c,v])
+        for y,row in enumerate(fresh.grid):
+            for x,c in enumerate(row):
+                if c and not fresh.group(x,y)[1]:raise ValueError('Detected position contains stones with no liberties.')
+        fresh.turn=color(turn);fresh.initial_turn=fresh.turn;fresh.move_offset=move_offset
+        fresh.history=[fresh.snapshot()]
+        self.__dict__.update(fresh.__dict__)
+
     def sgf(self):
         def coord(v):
             if v in ('PASS', 'RESIGN'):
@@ -123,4 +141,9 @@ class Board:
             out += f'RE[{self.result}]'
         if self.handicap:
             out += f'HA[{len(self.handicap)}]AB' + ''.join(f'[{coord(v)}]' for v in self.handicap)
+        if self.initial_stones or self.move_offset:
+            for c in ('B','W'):
+                vertices=[v for stone,v in self.initial_stones if stone==c]
+                if vertices:out+='A'+c+''.join(f'[{coord(v)}]' for v in vertices)
+            out+=f'PL[{self.initial_turn}]C[Screen snapshot at move {self.move_offset}. Earlier history and captures unknown.]'
         return out + ''.join(f';{c}[{coord(v)}]' for c,v in self.moves if v != 'RESIGN') + ')'

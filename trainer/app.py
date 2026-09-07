@@ -51,6 +51,8 @@ class Trainer:
                 data = json.loads(session.read_text('utf-8'))
                 b = Board(data['size'], data['komi'], data['rules'])
                 b.setup(data.get('handicap', []))
+                if data.get('initialStones') or data.get('moveOffset'):
+                    b.setup_position(data.get('initialStones',[]),data.get('initialTurn','B'),data.get('moveOffset',0))
                 for c,v in data['moves']:
                     b.play(c,v)
                 b.result = data.get('result', '')
@@ -70,6 +72,7 @@ class Trainer:
             b = self.board
             return deepcopy(dict(size=b.size, komi=b.komi, rules=b.rules, grid=b.grid,
                 turn=b.turn, moves=b.moves, handicap=b.handicap, captures=b.captures,
+                initialStones=b.initial_stones,initialTurn=b.initial_turn,moveOffset=b.move_offset,
                 result=b.result, history=b.history, analysis=self.analysis,
                 evaluations=self.evaluations, analyses=self.analyses, logs=list(self.logs), busy=self.busy,
                 mode=self.mode, engine=bool(self.engine and self.engine.alive),
@@ -82,7 +85,8 @@ class Trainer:
         with self.state_lock:
             b = self.board
             data = dict(size=b.size, komi=b.komi, rules=b.rules, moves=b.moves,
-                        handicap=b.handicap, result=b.result, evaluations=self.evaluations, analyses=self.analyses)
+                        handicap=b.handicap,initialStones=b.initial_stones,initialTurn=b.initial_turn,moveOffset=b.move_offset,
+                        result=b.result, evaluations=self.evaluations, analyses=self.analyses)
             for name, value in (('session', data), ('settings', self.settings)):
                 tmp = self.data_dir / (name + '.tmp')
                 tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -114,6 +118,8 @@ class Trainer:
         engine.command(f'kata-set-rules {board.rules}')
         if board.handicap:
             engine.command('set_free_handicap ' + ' '.join(board.handicap))
+        if board.initial_stones:
+            engine.command('set_position '+' '.join(f'{c} {v}' for c,v in board.initial_stones))
         for c,v in board.moves:
             if v != 'RESIGN':
                 engine.command(f'play {c} {v}')
