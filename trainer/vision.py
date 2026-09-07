@@ -116,48 +116,22 @@ class VisionConnector:
         self.desktop=desktop;self.cfg=None;self.target=None;self.preview=b''
         self.stopped=threading.Event();self.cancel=threading.Event();self.guard=threading.RLock()
         self.thread=None;self.armed=False;self.pending=None;self.pending_at=0
-        self.last=None;self.stable=0;self.started=False;self.ai='W'
-        self.status={'status':'Choose FoxGo and capture its board','armed':False,'running':False}
+        self.last=None;self.stable=0;self.started=False;self.ai=None
+        self.auto_role=True;self.role=None;self.role_image=None;self.role_checked=0;self.role_key=None
+        self.status={'status':'Start automatic play to detect FoxGo','armed':False,'running':False}
 
     def state(self):
         with self.guard:return deepcopy({**self.status,'armed':self.armed,'running':self.started,
-            'pendingMove':self.pending.moves[-1][1] if self.pending else None,'calibration':self.cfg})
-
-    def capture(self,hwnd):
-        image,info=self.desktop.capture(int(hwnd))
-        out=io.BytesIO();image.save(out,format='PNG')
-        with self.guard:self.preview=out.getvalue();self.target=info;self.cfg=None
-        return info
-
-    def configure(self,data):
-        if not self.target or not self.preview:raise ValueError('Capture FoxGo first.')
-        from PIL import Image
-        image=Image.open(io.BytesIO(self.preview))
-        cfg=calibration(data,*image.size)
-        result=recognize(image,cfg)
-        with self.guard:self.cfg=cfg;self.status={**result,'status':'Check detected stones before starting'}
+            'pendingMove':self.pending.moves[-1][1] if self.pending else None,'calibration':self.cfg,'aiColor':self.ai})
 
     def start(self,data):
         if self.thread and self.thread.is_alive():raise ValueError('Previous vision worker is still stopping.')
-        size=int(data.get('size',19))
-        if size not in (9,13,19):raise ValueError('Use a 9, 13 or 19 line board.')
-        if not self.cfg:
-            windows=self.desktop.windows()
-            if not windows:raise ValueError('Open a FoxGo game window first.')
-            selected=next((w for w in windows if w['hwnd']==int(data.get('hwnd') or 0)),None)
-            if selected is None:
-                active=[w for w in windows if w.get('active')]
-                choices=active or windows
-                if len(choices)!=1:raise ValueError('Several FoxGo windows found; select the game window first.')
-                selected=choices[0]
-            self.target=selected
-        ai=data.get('color','W');komi=float(data.get('komi',7.5))
-        if ai not in ('B','W') or not math.isfinite(komi) or abs(komi)>100:raise ValueError('Invalid color or komi.')
+        self.cfg=None;self.target=None;self.role=None;self.role_image=None;self.role_checked=0;self.role_key=None
         self.app.require_engine()
-        board=Board(self.cfg['size'] if self.cfg else size,komi,'chinese')
+        board=Board(19,7.5,'chinese')
         self.app.reset_engine(board);self.app.commit_board(board)
         self.app.analysis={};self.app.evaluations={};self.app.analyses={}
-        self.ai=ai;self.started=True;self.initialized=False;self.armed=True;self.room=None
+        self.ai=None;self.auto_role=True;self.started=True;self.initialized=False;self.armed=True;self.room=None
         self.stopped.clear();self.cancel.clear();self.last=None;self.stable=0;self.pending=None
         self.status={'status':'Reading FoxGo continuously · automatic moves enabled'}
         self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
@@ -185,6 +159,12 @@ class VisionConnector:
 
     def tick(self):
         if self.desktop.emergency():self.pause('Escape pressed');return
+        if not self.target:
+            windows=self.desktop.windows()
+            choices=[w for w in windows if w.get('active')] or [w for w in windows if w.get('room')]
+            if len(choices)!=1:
+                self.status['status']='Waiting for one FoxGo game window';return
+            self.target=choices[0]
         try:image,info=self.desktop.capture(self.target['hwnd'])
         except (ValueError,OSError) as exc:
             self.last=None;self.stable=0;self.status['status']=str(exc);return
@@ -192,11 +172,31 @@ class VisionConnector:
             raise ValueError('FoxGo process was replaced; restart tracking.')
         out=io.BytesIO();image.save(out,format='PNG');self.preview=out.getvalue()
         if not self.cfg or image.size!=(self.cfg['width'],self.cfg['height']):
-            try:self.cfg=detect_board(image,self.app.board.size)
-            except ValueError as exc:
-                self.status['status']=str(exc);return
+            self.cfg=None
+            for size in (19,13,9):
+                try:self.cfg=detect_board(image,size);break
+                except ValueError:pass
+            if not self.cfg:
+                self.status['status']='Waiting to detect the FoxGo board grid';return
+            if self.cfg['size']!=self.app.board.size:
+                if self.initialized:raise ValueError('Board size changed during the game.')
+                board=Board(self.cfg['size'],7.5,'chinese')
+                self.app.reset_engine(board);self.app.commit_board(board)
             self.last=None;self.stable=0
         self.target=info
+        if self.auto_role:
+            key=(info.get('room'),image.size)
+            if key!=self.role_key or time.monotonic()-self.role_checked>3:
+                self.role=None;self.ai=None;self.role_key=key
+                try:
+                    from .vision_role import detect_role
+                    self.role=detect_role(image,self.cfg,self.app.settings.get('foxAccount',''))
+                    self.role_image=image.crop(tuple(self.role['bounds'])).tobytes()
+                    self.ai=self.role['color'];self.role_key=key
+                except (ValueError,OSError) as exc:
+                    self.status['roleStatus']=str(exc)
+                self.role_checked=time.monotonic()
+            if self.role:self.status['roleStatus']=self.role['account']+' · '+('Black' if self.ai=='B' else 'White')+' detected in FoxGo'
         result=recognize(image,self.cfg)
         with self.guard:self.status.update(result)
         if result['uncertain']:
@@ -229,7 +229,11 @@ class VisionConnector:
             c,v=candidate.moves[-1];self.app.require_engine().command(f'play {c} {v}')
             self.app.commit_board(candidate);self.status['status']='Observed '+c+' '+v
         if self.app.board.result:self.pause('Game ended locally; verify result in FoxGo');return
-        if not self.armed or self.app.board.turn!=self.ai:return
+        if not self.armed:return
+        if self.auto_role and not self.ai:
+            self.status['status']='Waiting to identify the account’s color in FoxGo';return
+        if self.app.board.turn!=self.ai:
+            self.status['status']='Watching opponent’s turn';return
         if not info.get('active') or not info.get('room'):
             self.status['status']='Waiting for an active FoxGo match';return
         if self.room and info['room']!=self.room:
@@ -260,6 +264,8 @@ class VisionConnector:
         if new_info!=info or check['grid']!=grid or check['uncertain']:
             self.last=None;self.stable=0
             self.status['status']='Board changed during search; reading again';return
+        if self.auto_role and (not self.role or fresh.crop(tuple(self.role['bounds'])).tobytes()!=self.role_image):
+            self.role_key=None;self.status['status']='Player identity display changed; checking color again';return
         candidate=deepcopy(self.app.board);candidate.play(self.ai,move)
         x,y=point(move,candidate.size)
         with self.guard:

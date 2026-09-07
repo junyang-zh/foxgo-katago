@@ -54,6 +54,9 @@ class VisionTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.app=Trainer(self.tmp.name);self.app.engine=Engine()
         self.desktop=Desktop();self.v=VisionConnector(self.app,self.desktop)
         self.v.cfg=CFG;self.v.target=self.desktop.info.copy();self.v.ai='B'
+        self.v.auto_role=False
+        self.role_patch=patch('trainer.vision_role.detect_role',return_value=dict(color='B',account='test',bounds=[0,0,1,1]))
+        self.role_patch.start();self.addCleanup(self.role_patch.stop)
         self.app.board=Board(9);self.v.initialized=True;self.v.room=None;self.v.started=True
         self.v.arm_after=0
     def tearDown(self):self.app.close();self.tmp.cleanup()
@@ -157,6 +160,20 @@ class VisionTests(unittest.TestCase):
     def test_resume_has_no_countdown(self):
         self.v.pause();self.v.arm();self.stable_tick()
         self.assertEqual(len(self.desktop.clicks),1)
+
+    def test_unknown_role_blocks_clicks_but_tracks_board(self):
+        self.v.auto_role=True;self.v.armed=True;self.v.ai=None
+        with patch('trainer.vision_role.detect_role',side_effect=ValueError('Name obscured')):
+            self.stable_tick()
+        self.assertFalse(self.desktop.clicks);self.assertTrue(self.v.armed)
+        self.v.role_checked=0
+        self.stable_tick();self.assertEqual(len(self.desktop.clicks),1)
+
+    def test_connector_never_starts_engine(self):
+        self.app.engine=None
+        with patch.object(self.app,'ensure_engine') as start:
+            with self.assertRaises(RuntimeError):self.v.start({})
+        start.assert_not_called()
     def test_bad_calibration(self):
         for data in (dict(size=9,x0=0,y0=0,x1=350,y1=350),dict(size=9,x0=30,y0=30,x1=50,y1=350)):
             with self.assertRaises(ValueError):calibration(data,420,420)

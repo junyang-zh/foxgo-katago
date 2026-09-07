@@ -37,7 +37,7 @@ class Trainer:
         self.connector = 'direct'
         self.vision = None
         self.settings = dict(executable='', model='', config=str(ROOT/'config'/'gtp.cfg'),
-                             visits=200, seconds=2.0, aiColor='W')
+                             visits=200, seconds=2.0, aiColor='W', foxAccount='')
         self.revision = 0
         saved = self.data_dir / 'settings.json'
         if saved.exists():
@@ -59,7 +59,7 @@ class Trainer:
                 self.analyses = {int(k):v for k,v in data.get('analyses', {}).items()}
             except (KeyError, ValueError, OSError):
                 self.log('warning', 'Could not restore the saved game.')
-        self.log('info', 'Local trainer ready. Connect KataGo for AI play and analysis.')
+        self.log('info', 'Trainer initialized. The command-line backend starts KataGo automatically.')
 
     def log(self, level, message):
         with self.state_lock:
@@ -90,8 +90,21 @@ class Trainer:
 
     def require_engine(self):
         if not self.engine or not self.engine.alive:
-            raise EngineError('Connect KataGo in Engine settings first.')
+            raise EngineError('KataGo is unavailable. Check the backend startup log.')
         return self.engine
+
+    def ensure_engine(self):
+        """Start the saved engine, discovering a bundled installation if needed."""
+        if self.engine and self.engine.alive:return self.engine
+        settings=self.settings.copy()
+        if not Path(settings['executable']).is_file():
+            settings['executable']=str(ROOT/'engines'/'katago'/'katago.exe')
+        if not Path(settings['model']).is_file():
+            models=sorted((ROOT/'models').glob('*.bin.gz'),key=lambda p:p.stat().st_mtime,reverse=True)
+            if models:settings['model']=str(models[0])
+        self.log('info','Starting KataGo automatically with the backend.')
+        self.connect_engine(settings)
+        return self.require_engine()
 
     def reset_engine(self, board):
         engine = self.require_engine()
@@ -358,13 +371,9 @@ class Trainer:
         if name=='vision-stop':v.stop()
         if not self.operation.acquire(timeout=10):raise ValueError('Wait for the current engine operation.')
         try:
-            if name=='vision-windows':return {**self.state(),'windows':v.desktop.windows()}
-            if name in ('vision-capture','vision-calibrate','vision-start') and v.started:
-                raise ValueError('Stop vision before changing calibration or restarting.')
-            if name=='vision-capture':
-                v.capture(data['hwnd'])
-            elif name=='vision-calibrate':v.configure(data)
-            elif name=='vision-start':
+            if name=='vision-start' and v.started:
+                raise ValueError('Vision is already running.')
+            if name=='vision-start':
                 v.start(data);self.mode='vision';self.connector='vision'
             elif name=='vision-arm':v.arm()
             elif name=='vision-pass':

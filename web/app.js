@@ -147,7 +147,7 @@ function renderControls() {
   document.querySelectorAll('[data-local]').forEach(b=>b.disabled=busy||online||reviewing!==null);
   document.querySelectorAll('[data-engine]').forEach(b=>b.disabled=b.disabled||!state.engine);
   $('settings-open').disabled=busy||online;
-  $('fox-toggle').disabled=state.mode==='vision'||pending||(!online&&(busy||!state.engine));
+  $('fox-toggle').disabled=state.mode==='vision'||pending||(!online&&busy);
   $('connector-type').disabled=pending||switchingConnector;
   $('fox-reserve').disabled=online||busy;
   $('fox-sync').disabled=pending||!state.foxConnected||state.connector!=='direct';

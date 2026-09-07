@@ -1,6 +1,6 @@
 # FoxGo / KataGo — Personal Go Studio
 
-A local Go trainer with a browser board, real KataGo analysis, and three connectors: **direct FoxGo TCP, official FoxGTP relay, and calibrated screen vision**. The app never logs into FoxGo itself. FoxGo controls online games through its AI-enabled account interface.
+A local Go trainer with a browser board, real KataGo analysis, and three connectors: **direct FoxGo TCP, official FoxGTP relay, and automatic screen vision**. The app never logs into FoxGo itself. FoxGo controls online games through its AI-enabled account interface.
 
 ## Start on Windows
 
@@ -15,7 +15,7 @@ python -m trainer.server
 
 Open **http://127.0.0.1:8173**, choose **Engine settings → Connect engine**. The installer fills in local paths. `./start.ps1` is an alternative launcher that can also use the Codex bundled Python runtime. Keep the terminal open while using the trainer; Ctrl+C stops the server and engine. Use `--port 8174` if the default port is occupied.
 
-For matches, `./start.ps1 -Background` runs the server independently of the launching terminal. It prints the process ID for stopping it and writes server output to `data/server.stdout.log` and `data/server.stderr.log`. Connect KataGo and start the listener in the panel after launch. If the backend stops, reconnect FoxGo after restarting it; a browser tab alone does not run the engine.
+For matches, `./start.ps1 -Background` runs the server independently of the launching terminal. It prints the process ID for stopping it and writes server output to `data/server.stdout.log` and `data/server.stderr.log`. KataGo starts automatically with the backend; start the desired connector in the panel after launch. If the backend stops, reconnect FoxGo after restarting it; a browser tab alone does not run the engine.
 
 The installer downloads official **KataGo v1.16.4 OpenCL for Windows** and **kata1-b28c512nbt-s13255194368-d5935380940**. This conservative OpenCL build supports the selected model and avoids a separate CUDA/cuDNN installation. The first start tunes GPU kernels and can take several minutes; later starts reuse its cache. On Linux/macOS, install your platform's KataGo build and set the executable/model/config paths manually. Paths with spaces are supported because subprocess arguments are passed as an array, without a shell.
 
@@ -43,7 +43,7 @@ Python trainer ── GTP stdin/stdout ── KataGo
 ```
 
 1. Log in to FoxGo with your AI-enabled account.
-2. Connect KataGo in the panel, then click **Start listener**. Default port: **6001**. Stop FoxGTP’s listener if it occupies this port.
+2. Once the backend reports KataGo ready, click **Start listener**. Default port: **6001**. Stop FoxGTP’s listener if it occupies this port.
 3. In FoxGo's AI management, connect to **127.0.0.1:6001** (or the selected port). Enable **Use Chinese rules after AI connection** and **Prohibit manual when AI connected**.
 4. Start matches in FoxGo. Invitations and adjudication remain in the official client. The panel displays the connection, clocks, confirmed board, pending move, and analysis.
 5. Click **Stop listener** to disconnect and return to local practice.
@@ -60,7 +60,7 @@ This implementation targets **Fox Go AI Protocol v1.05 (2022-06-06)**. Automated
 
 ## Official FoxGTP relay
 
-Choose **Official FoxGTP relay** in the TCP connector selector, then start the listener on **8001**. In FoxGTP select **Work → Synchronize AI to FoxClient** and **Communication → TCP/IP: FoxGTP → AI Engine**. Connect its engine side to **127.0.0.1:8001**, and listen for FoxGo on **6001**. FoxGo connects to **127.0.0.1:6001**. Leave common Go byo-yomi unchecked in FoxGTP and reserve one second for transmission. The panel mirrors GTP commands and collects KataGo analysis. This is now part of the main application; the temporary comparison checkout is no longer needed.
+Choose **Official FoxGTP relay** in the connection method selector, then start the listener on **8001**. In FoxGTP select **Work → Synchronize AI to FoxClient** and **Communication → TCP/IP: FoxGTP → AI Engine**. Connect its engine side to **127.0.0.1:8001**, and listen for FoxGo on **6001**. FoxGo connects to **127.0.0.1:6001**. Leave common Go byo-yomi unchecked in FoxGTP and reserve one second for transmission. The panel mirrors GTP commands and collects KataGo analysis. This is now part of the main application; the temporary comparison checkout is no longer needed.
 
 ## Screen / computer vision connector (Windows)
 
@@ -74,21 +74,21 @@ python -m trainer.server
 This connector reads pixels from the standard yellow FoxGo board, recognizes black/white stones, follows legal moves and captures, asks KataGo for a move, and clicks its intersection. It does not require FoxGo to forward TCP game packets. Only one connector can control the board at a time. Use the **Connection method** selector to choose direct TCP, FoxGTP relay, or screen vision; only the selected method’s controls are shown. Selecting another method stops the current connection first, then shows the new method’s controls. Start the new connection when ready.
 
 1. Stop any TCP listener in the trainer. Disconnect FoxGo's AI TCP connection and disable **Prohibit manual moves when AI connected**. Mouse input must be allowed.
-2. Connect KataGo and choose **your AI account's color**, board size and komi in **Screen / computer vision**. Click **Start automatic play** (or **Enable automatic moves**). Both start the same observation loop with automatic play enabled. There is no capture countdown or separate arming step.
-3. The connector finds the game window, detects the grid, and continuously captures its contents even behind the trainer panel. Keep FoxGo unminimized. The live preview shows green for empty intersections, blue for black stones, pink for white stones, and red for uncertain readings. If several FoxGo windows are open, use **Find FoxGo** to select one.
+2. Launch `python -m trainer.server`. KataGo starts with the backend using saved paths (or the bundled executable/model), before the server reports ready. No manual engine connection is required. Select **Screen / computer vision**, then click **Start automatic play**.
+3. The connector automatically finds the game window, detects 9/13/19-line grids, and reads your account's Black/White color from the player header and user-list stone icon using local Windows Chinese OCR. Your previously identified account is stored in the local `foxAccount` setting. No color selection or corner calibration is needed. Uncertain identity blocks clicks while board observation continues. Keep one game window open and unminimized. Chinese rules with 7.5 komi are used.
+
 4. Start before the first move, or just after Black's opening move. Existing mid-game history and handicap setup cannot be recovered from a screenshot. Three matching observations establish a stable position; subsequent legal moves and captures are tracked automatically.
 5. FoxGo is brought forward automatically just before a move, and the position is checked again before clicking. If Windows denies activation, select FoxGo once. Temporary unreadable frames, minimization and an inactive match keep the observer waiting without disabling automatic play. Moving the window is supported; resizing triggers grid detection again.
 6. **Hold Escape** or press **Pause clicks** to disarm while observation continues. **Resume automatic moves** resumes immediately. A different game room, inconsistent move history, or an unconfirmed click pauses automatic play. The connector never automatically repeats an unconfirmed click. Stop tracking before changing games.
 
-For an unusual layout, optional manual calibration remains available: stop tracking, find/select FoxGo, **Capture now**, mark the top-left and bottom-right grid intersections, and press **Read calibrated board**. The normal start path does not require these steps.
 
 A click is committed to KataGo only after its stone and captures are seen. A fast opponent reply can confirm both consecutive legal moves. After clicking, the pointer is parked over the title bar to avoid FoxGo's hover marker. Screen polling and three-frame confirmation add about one second; this connector does not read clocks, so use a conservative engine search limit (for example 1–2 seconds) and avoid very fast time controls.
 
 Passes and resignations cannot be reliably inferred from unchanged board pixels. If KataGo recommends either, automatic play pauses and shows the recommendation. Perform the action in FoxGo yourself. For **each actual pass by either player**, pause and click **Confirm a manual pass** to advance the tracked turn; do not use this while a player is merely thinking. After resignation or game end, stop tracking. Scoring and result acceptance remain manual in FoxGo.
 
-Calibration and automatic-play state are session-only. Restarting never resumes automatic clicking. Captured calibration images remain in local process memory and are served only by the local panel. Run the trainer and FoxGo at the same Windows privilege level. The recognizer is tuned for the standard yellow board and Chinese game-window titles; alternate themes/locales need adaptation. It uses confidence thresholds and surrounding-board checks, not a trained OCR model. These checks reduce errors but do not prove screen recognition is perfect.
+Grid detection and automatic-play state are session-only. Restarting never resumes automatic clicking. Captured images remain local. The OCR helper uses a temporary image file that is deleted after recognition. Run the trainer and FoxGo at the same Windows privilege level. The recognizer is tuned for the standard yellow board and Chinese game-window titles; alternate themes/locales need adaptation. Stone recognition uses confidence thresholds and surrounding-board checks; player identity uses Windows OCR. These checks reduce errors but do not prove screen recognition is perfect.
 
-Validation includes 39 unit tests, automatic grid detection, marker recognition, temporary capture failure recovery, fast replies, cancellation and no-retry behavior. Background capture and stone recognition were checked against the installed FoxGo window at 200% DPI. The installed KataGo also completed a search → simulated click → visual confirmation → engine commit cycle. Completing a live match through native mouse control has not yet been verified.
+Validation includes 45 unit tests, automatic grid detection, marker recognition, temporary capture failure recovery, fast replies, cancellation and no-retry behavior. Background capture, stone recognition and account-color OCR were checked against the installed FoxGo window at 200% DPI. Real command-line startup was verified to have KataGo ready with no connector running. The installed KataGo also completed a search → simulated click → visual confirmation → engine commit cycle. Completing a live match through native mouse control has not yet been verified.
 
 ## Diagnostics and local files
 
@@ -121,3 +121,5 @@ The UI optionally registers `read_go_position` and `play_local_go_move` when the
 - User-supplied **Fox Go AI Manual v2.01** and **Fox Go AI Protocol v1.05**, dated 2022-06-06. Integration implements the wire protocol directly, as requested, replacing the manual’s relay setup.
 
 KataGo and its networks retain their upstream licenses. This app is an independent personal trainer and is not affiliated with FoxGo or KataGo.
+
+The local OCR helper uses [Windows OcrEngine](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr.ocrengine), with the installed Simplified Chinese recognition language.

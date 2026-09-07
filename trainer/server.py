@@ -91,12 +91,17 @@ def main():
     args = parser.parse_args()
     app = Trainer(args.data_dir)
     server = create_server(app,args.port)
-    print(f'FoxGo KataGo trainer: http://127.0.0.1:{server.server_port}',flush=True)
-    print('Press Ctrl+C to stop. Configure your KataGo paths in Engine settings.',flush=True)
     try:
+        print('Starting KataGo automatically. Initial GPU setup may take a minute...',flush=True)
+        app.ensure_engine()
+        print(f'FoxGo KataGo trainer: http://127.0.0.1:{server.server_port} — KataGo ready',flush=True)
+        print('Press Ctrl+C to stop.',flush=True)
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f'Backend startup failed: {exc}',flush=True)
+        raise SystemExit(1)
     finally:
         server.server_close()
         app.close()
