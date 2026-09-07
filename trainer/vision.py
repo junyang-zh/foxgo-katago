@@ -84,11 +84,12 @@ def recognize(image, cfg):
             # neutral shading while still requiring at least half dark samples.
             if value=='B' and counts['B']>=16 and neutral>=30:score=.9
             if value in ('B','W'):
-                # A flat dialog/menu patch is not a stone: require surrounding wood.
+                # Require wood in the diagonal gaps between stones. Sampling
+                # beside a stone hits its neighbours in a crowded position.
                 wood=0
                 for i in range(16):
-                    a=(i+.5)*math.tau/16
-                    px=round(cx+cfg['dx']*.52*math.cos(a));py=round(cy+cfg['dy']*.52*math.sin(a))
+                    a=(i//4)*math.pi/2+math.radians(30+10*(i%4))
+                    px=round(cx+cfg['dx']*.65*math.cos(a));py=round(cy+cfg['dy']*.65*math.sin(a))
                     if not (0<=px<image.width and 0<=py<image.height):continue
                     r,g,b=pixels[px,py]
                     if r>b+25 and g>b+15 and r>120:wood+=1

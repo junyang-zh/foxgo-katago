@@ -134,6 +134,19 @@ class VisionTests(unittest.TestCase):
         self.assertFalse(result['uncertain'])
         self.assertEqual(result['grid'],b.grid)
 
+    def test_touching_stones_do_not_look_like_an_obstruction(self):
+        b=Board(9)
+        for y in range(3,6):
+            for x in range(3,6):b.grid[y][x]='B' if (x+y)%2 else 'W'
+        im=board_image(b);draw=ImageDraw.Draw(im)
+        for y in range(3,6):
+            for x in range(3,6):
+                cx,cy=30+x*40,30+y*40
+                draw.ellipse((cx-20,cy-20,cx+20,cy+20),fill=(25,25,25) if b.grid[y][x]=='B' else (225,225,225))
+        result=recognize(im,CFG)
+        self.assertFalse(result['uncertain'])
+        self.assertEqual(result['grid'],b.grid)
+
     def test_one_action_starts_detection_and_automatic_play(self):
         self.v.cfg=None;self.v.started=False
         with patch('trainer.vision.threading.Thread'):
