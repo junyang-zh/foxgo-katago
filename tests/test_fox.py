@@ -84,6 +84,15 @@ class FoxTests(unittest.TestCase):
         self.assertEqual(self.app.board.handicap,['C3','G7'])
         self.assertEqual(self.app.board.turn,'W')
 
+    def test_explicit_status_request_does_not_play(self):
+        self.game.handle('REQUEST_STATUS',['W'])
+        self.assertEqual(self.sent,[encode('AFSTATUS','W')])
+        self.assertEqual(self.app.board.moves,[])
+        self.assertFalse(self.game.synced)
+        self.game.handle('FASTATUS',['0'])
+        self.assertEqual(self.app.fox_game['status'],'FoxGo reports no active game')
+        with self.assertRaises(ValueError):self.game.handle('REQUEST_STATUS',['invalid'])
+
     def test_tcp_pipeline_and_stop(self):
         server=FoxServer(self.app,0)
         self.app.fox_server=server

@@ -134,6 +134,7 @@ function renderControls() {
   $('settings-open').disabled=busy||online;
   $('fox-toggle').disabled=pending||(!online&&(busy||!state.engine));
   $('fox-reserve').disabled=online||busy;
+  $('fox-sync').disabled=pending||!state.foxConnected;
   $('fox-port').disabled=online||busy;
   $('busy-label').textContent=state.busy?' / '+state.busy:'';
 }
@@ -200,6 +201,7 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();$('settings-error').tex
 $('engine-stop').onclick=async()=>{if(await action('engine-stop'))$('settings-dialog').close();};
 $('new-open').onclick=()=>$('new-dialog').showModal();
 $('new-form').onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));$('new-dialog').close();await action('new',data);};
+$('fox-sync').onclick=()=>action('fox-sync',{color:$('fox-color').value});
 $('fox-toggle').onclick=()=>action(state.mode==='online'?'fox-stop':'fox-start',{port:Number($('fox-port').value),reserve:Number($('fox-reserve').value)});
 function review(n){reviewing=Math.max(0,Math.min(state.moves.length,n));selectedChoice=null;render();}
 $('history').oninput=e=>review(Number(e.target.value));$('back').onclick=()=>review(atMove()-1);$('forward').onclick=()=>review(atMove()+1);

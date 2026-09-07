@@ -72,6 +72,13 @@ class FoxGame:
         self.want_move = ours and not self.pending and not self.app.board.result
 
     def handle(self,command,args):
+        if command == 'REQUEST_STATUS':
+            requested_color = side(args[0])
+            self.want_move = False
+            self.synced = False
+            self.send(encode('AFSTATUS',requested_color))
+            self.publish('Status requested · waiting for FoxGo')
+            return
         if command == 'FARULE':
             self.rules = Rules.parse(args)
             self.synced = self.in_game = self.want_move = False
@@ -92,7 +99,7 @@ class FoxGame:
                 self.pending = None
                 self.synced = True
                 self.requested_status = False
-                self.publish()
+                self.publish('FoxGo reports no active game')
                 return
             if len(args) < 2:
                 raise ValueError('Active FASTATUS requires the AI color.')
@@ -352,6 +359,19 @@ class FoxServer:
 
     def start(self):
         threading.Thread(target=self._accept,daemon=True).start()
+
+    def request_status(self, color):
+        color = side(color)
+        with self.guard:
+            connection = self.connection
+            if not connection or connection.stopped.is_set():
+                raise ValueError('FoxGo is not connected.')
+            with connection.ingest:
+                connection.changed.set()
+                try:
+                    connection.inbox.put_nowait(('REQUEST_STATUS',[color]))
+                except queue.Full:
+                    raise ValueError('FoxGo input queue is full; reconnect the client.')
 
     def _accept(self):
         while not self.stopped.is_set():

@@ -48,6 +48,8 @@ Python trainer ── GTP stdin/stdout ── KataGo
 4. Start matches in FoxGo. Invitations and adjudication remain in the official client. The panel displays the connection, clocks, confirmed board, pending move, and analysis.
 5. Click **Stop listener** to disconnect and return to local practice.
 
+If FoxGo says it is connected but the board is empty, check the connection detail. **FoxGo reports no active game** means the client sent `FASTATUS,0`, not that KataGo is thinking. During your own active match, select your actual color and click **Request game status** to send the documented `AFSTATUS` query. This does not place a move. An active snapshot still needs rules and a turn notice before the trainer can play.
+
 The controller implements checksummed CRLF packets, rules/handicap snapshots, indexed moves, passes, resignation, score requests/results and clocks from the supplied protocol. It accepts one local client. Malformed packets, conflicting moves and index gaps suspend play and request a snapshot. Local edits are locked while listening.
 
 KataGo searches without changing its board. Only FoxGo-confirmed moves are applied. Incoming events cancel an active search so a stale result is not sent. The default one-second reserve reduces the available clock; main-time consumption is tracked between FoxGo clock updates. Search time and visit limits still apply. Stopping online play restores untimed local play.

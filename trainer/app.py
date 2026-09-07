@@ -195,6 +195,11 @@ class Trainer:
         return vertex.lower() if vertex in ('PASS','RESIGN') else vertex
 
     def action(self, name, data):
+        if name == 'fox-sync':
+            if not self.fox_server:
+                raise ValueError('Start the FoxGo listener first.')
+            self.fox_server.request_status(data.get('color'))
+            return self.state()
         if name == 'fox-stop' and self.fox_server:
             self.fox_server.stop()
         if not self.operation.acquire(timeout=10 if name == 'fox-stop' else .25):
