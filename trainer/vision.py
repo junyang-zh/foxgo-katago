@@ -159,6 +159,7 @@ class VisionConnector:
 
     def tick(self):
         if self.desktop.emergency():self.pause('Escape pressed');return
+        if self.pending and hasattr(self.desktop,'park'):self.desktop.park(self.target['hwnd'])
         if not self.target:
             windows=self.desktop.windows()
             choices=[w for w in windows if w.get('active')] or [w for w in windows if w.get('room')]

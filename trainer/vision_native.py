@@ -107,15 +107,22 @@ class WindowsDesktop:
         class INPUT(C.Structure):
             _fields_=[('type',W.DWORD),('u',INPUTUNION)]
         self.u.SendInput.argtypes=[W.UINT,C.POINTER(INPUT),C.c_int]
-        # Absolute virtual-desktop coordinates make negative-monitor origins work.
-        left,top=self.u.GetSystemMetrics(76),self.u.GetSystemMetrics(77)
-        width,height=self.u.GetSystemMetrics(78),self.u.GetSystemMetrics(79)
-        dx=round((px-left)*65535/max(1,width-1));dy=round((py-top)*65535/max(1,height-1))
-        events=[INPUT(0,INPUTUNION(MOUSEINPUT(dx,dy,0,f,0,0))) for f in (0xC001,0xC003,0xC005)]
-        # Park over the title bar so FoxGo's hover square cannot obscure recognition.
-        parkx=round(((current['rect'][0]+current['rect'][2])/2-left)*65535/max(1,width-1))
-        parky=round((current['rect'][1]+10-top)*65535/max(1,height-1))
-        events.append(INPUT(0,INPUTUNION(MOUSEINPUT(parkx,parky,0,0xC001,0,0))))
-        inputs=(INPUT*4)(*events)
-        if self.u.SendInput(4,inputs,C.sizeof(INPUT))!=4:
+        # GetWindowRect and SetCursorPos share physical coordinates under the
+        # thread's DPI context; avoid virtual-desktop normalization across DPIs.
+        self.u.SetCursorPos.argtypes=[C.c_int,C.c_int]
+        self.u.GetCursorPos.argtypes=[C.POINTER(W.POINT)]
+        if not self.u.SetCursorPos(px,py):raise RuntimeError('Windows rejected cursor positioning.')
+        actual=W.POINT();self.u.GetCursorPos(C.byref(actual))
+        if (actual.x,actual.y)!=(px,py):raise ValueError('Cursor did not reach the move; click cancelled.')
+        events=[INPUT(0,INPUTUNION(MOUSEINPUT(0,0,0,f,0,0))) for f in (0x0002,0x0004)]
+        # Leave the cursor here until the next observation cycle. FoxGo can
+        # consult its current position when processing queued button events.
+        inputs=(INPUT*2)(*events)
+        if self.u.SendInput(2,inputs,C.sizeof(INPUT))!=2:
             raise RuntimeError('Windows rejected mouse input. Match application privilege levels.')
+
+    def park(self, hwnd):
+        current=self.describe(hwnd)
+        if self.u.GetForegroundWindow()!=hwnd:return
+        self.u.SetCursorPos.argtypes=[C.c_int,C.c_int]
+        self.u.SetCursorPos(round((current['rect'][0]+current['rect'][2])/2),current['rect'][1]+10)
