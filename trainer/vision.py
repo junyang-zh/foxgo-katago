@@ -124,11 +124,12 @@ class VisionConnector:
         self.thread=None;self.armed=False;self.pending=None;self.pending_at=0
         self.last=None;self.stable=0;self.started=False;self.ai=None
         self.auto_role=True;self.role=None;self.role_image=None;self.role_checked=0;self.role_key=None
+        self.auto_play=False;self.phase='stopped';self.between_games=False;self.inactive_frames=0;self.observation=None
         self.status={'status':'Start automatic play to detect FoxGo','armed':False,'running':False}
 
     def state(self):
         with self.guard:return deepcopy({**self.status,'armed':self.armed,'running':self.started,
-            'pendingMove':self.pending.moves[-1][1] if self.pending else None,'calibration':self.cfg,'aiColor':self.ai})
+            'pendingMove':self.pending.moves[-1][1] if self.pending else None,'calibration':self.cfg,'aiColor':self.ai,'phase':self.phase})
 
     def start(self,data):
         if self.thread and self.thread.is_alive():raise ValueError('Previous vision worker is still stopping.')
@@ -138,6 +139,7 @@ class VisionConnector:
         self.app.reset_engine(board);self.app.commit_board(board)
         self.app.analysis={};self.app.evaluations={};self.app.analyses={}
         self.ai=None;self.auto_role=True;self.started=True;self.initialized=False;self.armed=True;self.room=None
+        self.auto_play=True;self.phase='waiting';self.between_games=False;self.inactive_frames=0;self.observation=None
         self.stopped.clear();self.cancel.clear();self.last=None;self.stable=0;self.pending=None
         self.status={'status':'Reading FoxGo continuously · automatic moves enabled'}
         self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
@@ -147,13 +149,18 @@ class VisionConnector:
             if not self.started:raise ValueError('Start tracking first.')
             if self.pending:raise ValueError('Wait for the pending move to be confirmed.')
             self.cancel.clear();self.armed=True
+            self.auto_play=True;self.phase='playing'
             self.status['status']='Reading FoxGo continuously · automatic moves enabled'
 
-    def pause(self,reason='Paused'):
-        with self.guard:self.armed=False;self.cancel.set();self.status['status']=reason
+    def pause(self,reason='Paused', *, fault=False):
+        with self.guard:
+            self.armed=False;self.cancel.set();self.status['status']=reason
+            if not fault:self.auto_play=False
+            self.phase='blocked' if fault else 'paused'
 
     def stop(self):
         self.pause('Stopped');self.stopped.set();self.started=False
+        self.phase='stopped'
         if self.thread and self.thread is not threading.current_thread():self.thread.join(timeout=10)
 
     def manual_pass(self):
@@ -178,6 +185,14 @@ class VisionConnector:
         if info['pid']!=self.target['pid']:
             raise ValueError('FoxGo process was replaced; restart tracking.')
         out=io.BytesIO();image.save(out,format='PNG');self.preview=out.getvalue()
+        if not info.get('active') or not info.get('room'):
+            self.inactive_frames+=1
+            if self.inactive_frames>=3:self.between_games=True
+            self.last=None;self.stable=0;self.observation=None
+            self.phase='finished' if self.initialized else 'waiting'
+            self.status['status']='Waiting for an active FoxGo match · new games are detected automatically'
+            return
+        self.inactive_frames=0
         if not self.cfg or image.size!=(self.cfg['width'],self.cfg['height']):
             self.cfg=None
             for size in (19,13,9):
@@ -185,8 +200,7 @@ class VisionConnector:
                 except ValueError:pass
             if not self.cfg:
                 self.status['status']='Waiting to detect the FoxGo board grid';return
-            if self.cfg['size']!=self.app.board.size:
-                if self.initialized:raise ValueError('Board size changed during the game.')
+            if self.cfg['size']!=self.app.board.size and not self.initialized:
                 board=Board(self.cfg['size'],7.5,'chinese')
                 self.app.reset_engine(board);self.app.commit_board(board)
             self.last=None;self.stable=0
@@ -210,9 +224,40 @@ class VisionConnector:
             self.last=None;self.stable=0
             self.status['status']='Waiting for clear intersections: '+', '.join(result['uncertain'][:8]);return
         grid=result['grid']
+        observation=(info.get('room'),info.get('moveNumber'),info.get('pid'))
+        if observation!=self.observation:
+            self.last=None;self.stable=0;self.observation=observation
         if grid==self.last:self.stable+=1
         else:self.last=deepcopy(grid);self.stable=1
         if self.stable<3:return
+        number=info.get('moveNumber')
+        expected=self.app.board.move_offset+len(self.app.board.moves)
+        stones=sum(bool(c) for row in grid for c in row)
+        if number in (0,1) and (stones!=number or (number==1 and sum(c=='B' for row in grid for c in row)!=1)):
+            self.status['status']='Waiting for the new-game board and move counter to agree'
+            return
+        opening_reset=(isinstance(number,int) and number in (0,1) and expected>number and
+                       stones==number and
+                       (number==0 or sum(c=='B' for row in grid for c in row)==1))
+        new_game=self.initialized and ((self.between_games and self.room is not None) or
+            (self.room is not None and info['room']!=self.room) or opening_reset)
+        if new_game:
+            board=Board(self.cfg['size'],7.5,'chinese')
+            self.app.reset_engine(board);self.app.commit_board(board)
+            self.app.analysis={};self.app.evaluations={};self.app.analyses={}
+            self.pending=None;self.pending_at=0;self.initialized=False;self.room=None
+            self.role=None;self.role_image=None;self.role_key=None
+            if self.auto_role:self.ai=None
+            self.between_games=False;self.armed=self.auto_play or self.armed
+            if self.armed:self.cancel.clear()
+            self.phase='attaching';self.last=None;self.stable=0
+            self.status.pop('historyNote',None)
+            self.status['status']='New FoxGo game detected · checking board and player color'
+            self.app.log('vision',self.status['status'])
+            return
+        self.between_games=False
+        if self.phase=='blocked':return
+        if self.cfg['size']!=self.app.board.size:raise ValueError('Board size changed during the game.')
         if not self.initialized:
             number=info.get('moveNumber')
             if not isinstance(number,int) or number<0:
@@ -225,6 +270,7 @@ class VisionConnector:
                 self.status['historyNote']=f'Attached at move {number}; earlier moves, captures and ko history are unknown.'
                 self.app.log('vision',self.status['historyNote'])
             self.initialized=True;self.status['status']='Board verified'
+            self.phase='playing' if self.armed else 'paused';self.between_games=False
             self.room=info.get('room') if info.get('active') else None
         if self.pending:
             following=None
@@ -307,7 +353,7 @@ class VisionConnector:
                 if self.app.revision!=before:self.app.save()
             except Exception as exc:
                 changed=self.status.get('status')!=str(exc)
-                self.pause(str(exc))
+                self.pause(str(exc),fault=True)
                 if changed:self.app.log('vision',str(exc))
             finally:
                 self.app.busy='';self.app.operation.release()

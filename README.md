@@ -133,3 +133,7 @@ KataGo and its networks retain their upstream licenses. This app is an independe
 The local OCR helper uses [Windows OcrEngine](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr.ocrengine), with the installed Simplified Chinese recognition language.
 
 If FoxGo runs as Administrator and the trainer does not, Windows blocks input even though capture works. The connector reports this before searching. Stop the existing trainer, then run `powershell -ExecutionPolicy Bypass -File .\start.ps1 -Administrator` and approve the Windows UAC prompt. This starts the backend (and KataGo) in the background with matching privileges; logs remain in `data/server.stdout.log` and `data/server.stderr.log`. Alternatively run both programs without Administrator privileges.
+
+### Automatic screen game lifecycle
+
+Leave screen tracking running between matches. It waits while FoxGo is in the lobby or showing a finished game. Three consistent observations of a new room, a new active game after the previous game ended, or an opening board with a reset move counter trigger fresh tracking. Pending clicks, old analysis, and heart-opening progress are cleared; player color is detected again. A manually paused connector stays paused. A fault blocks further moves in that game but permits automatic recovery when a new game is confirmed.

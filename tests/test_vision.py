@@ -103,6 +103,56 @@ class VisionTests(unittest.TestCase):
         self.assertFalse(any('analyze' in c for c in self.app.engine.commands))
         self.desktop.board.play('B',first);self.stable_tick()
         self.assertEqual(self.app.board.moves,[['B',first]])
+
+    def previous_game(self):
+        self.desktop.board.play('B','D4');self.desktop.board.play('W','E5')
+        self.app.board=deepcopy(self.desktop.board);self.v.room='1号房间'
+        self.v.auto_play=True;self.v.armed=True;self.v.phase='playing'
+        self.app.analyses={2:{'ownership':[.5]*81}}
+
+    def test_new_room_clears_pending_history_and_restarts_heart(self):
+        from trainer.entertainment import heart_points
+        self.previous_game();self.app.settings['heartOpening']=True
+        self.v.pending=deepcopy(self.app.board);self.v.pending.play('B','C3')
+        self.desktop.info['room']='2号房间';self.desktop.board=Board(9)
+        self.stable_tick()
+        self.assertFalse(self.v.initialized);self.assertIsNone(self.v.pending)
+        self.assertEqual(self.app.board.moves,[]);self.assertEqual(self.app.analyses,{})
+        self.assertIsNone(self.v.role_key)
+        self.stable_tick()
+        self.assertEqual(self.v.pending.moves,[['B',heart_points(9)[0]]])
+
+    def test_same_room_counter_reset_recovers_fault(self):
+        self.previous_game();self.v.pause('old game mismatch',fault=True)
+        self.desktop.board=Board(9)
+        self.stable_tick();self.stable_tick()
+        self.assertTrue(self.v.armed);self.assertEqual(len(self.desktop.clicks),1)
+
+    def test_finished_game_waits_then_attaches_next_match(self):
+        self.previous_game();self.desktop.info['active']=False
+        self.desktop.board=Board(9)
+        self.stable_tick()
+        self.assertEqual(self.v.phase,'finished');self.assertFalse(self.desktop.clicks)
+        self.assertEqual(len(self.app.board.moves),2)
+        self.desktop.info['active']=True
+        for c,v in [('B','A1'),('W','B1'),('B','C1')]:self.desktop.board.play(c,v)
+        self.stable_tick();self.stable_tick()
+        self.assertEqual(self.app.board.move_offset,3)
+        self.assertEqual(self.app.board.grid,self.desktop.board.grid)
+
+    def test_manual_pause_survives_new_game(self):
+        self.previous_game();self.v.pause()
+        self.desktop.board=Board(9);self.desktop.info['room']='2号房间'
+        self.stable_tick();self.stable_tick()
+        self.assertFalse(self.v.armed);self.assertFalse(self.desktop.clicks)
+        self.assertTrue(self.v.initialized)
+
+    def test_transient_counter_reset_does_not_discard_game(self):
+        self.previous_game();old=deepcopy(self.desktop.board)
+        self.desktop.board=Board(9);self.v.tick()
+        self.desktop.board=old;self.v.tick()
+        self.assertEqual(self.app.board.moves,old.moves)
+        self.assertTrue(self.v.initialized)
     def test_timeout_does_not_repeat_click(self):
         self.v.armed=True;self.stable_tick();self.v.pending_at=time.monotonic()-6
         with self.assertRaises(ValueError):self.stable_tick()
