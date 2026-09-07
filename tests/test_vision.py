@@ -125,6 +125,15 @@ class VisionTests(unittest.TestCase):
         self.assertEqual(recognize(im,cfg)['grid'],b.grid)
         with self.assertRaises(ValueError):detect_board(Image.new('RGB',(420,420),'white'),9)
 
+    def test_black_quarter_marker_with_grey_highlight(self):
+        b=Board(9);b.play('B','D4');im=board_image(b)
+        draw=ImageDraw.Draw(im)
+        draw.pieslice((132,212,168,248),0,90,fill='white')
+        draw.pieslice((132,212,168,248),170,230,fill=(130,130,130))
+        result=recognize(im,CFG)
+        self.assertFalse(result['uncertain'])
+        self.assertEqual(result['grid'],b.grid)
+
     def test_one_action_starts_detection_and_automatic_play(self):
         self.v.cfg=None;self.v.started=False
         with patch('trainer.vision.threading.Thread'):

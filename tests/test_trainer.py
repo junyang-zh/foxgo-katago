@@ -104,5 +104,11 @@ class IntegrationTests(unittest.TestCase):
             c.request('GET','/../../.git/config');r=c.getresponse();self.assertEqual(r.status,404);r.read()
         finally:c.close();server.shutdown();server.server_close()
 
+    def test_second_backend_cannot_bind_same_port(self):
+        server=create_server(self.app,0)
+        try:
+            with self.assertRaises(OSError):create_server(self.app,server.server_port)
+        finally:server.server_close()
+
 
 if __name__=='__main__':unittest.main()

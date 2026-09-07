@@ -3,10 +3,22 @@ import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import secrets
+import socket
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from .app import Trainer, ROOT
+
+
+class TrainerHTTPServer(ThreadingHTTPServer):
+    # Windows SO_REUSEADDR can allow two trainers to bind the same address,
+    # leaving the panel connected to a different process than the connector.
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def create_server(app, port=8173):
@@ -79,7 +91,7 @@ def create_server(app, port=8173):
                 app.log('error',f'Unexpected server error: {exc}')
                 self.send(500,'{"error":"Unexpected error. See diagnostic log."}')
 
-    server = ThreadingHTTPServer(('127.0.0.1',port),Handler)
+    server = TrainerHTTPServer(('127.0.0.1',port),Handler)
     server.daemon_threads = True
     return server
 

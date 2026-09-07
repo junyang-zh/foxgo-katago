@@ -67,17 +67,22 @@ def recognize(image, cfg):
         row=[]
         for x in range(cfg['size']):
             cx=cfg['x0']+x*cfg['dx'];cy=cfg['y0']+y*cfg['dy']
-            counts={'B':0,'W':0,'':0}
+            counts={'B':0,'W':0,'':0};neutral=0
             # An annulus avoids the grid crossing and the last-move marker.
             for i in range(32):
                 a=(i+.5)*math.tau/32
                 r,g,b=pixels[round(cx+cfg['dx']*.30*math.cos(a)),round(cy+cfg['dy']*.30*math.sin(a))]
+                if max(r,g,b)-min(r,g,b)<48:neutral+=1
                 if max(r,g,b)<105:counts['B']+=1
                 elif min(r,g,b)>145 and max(r,g,b)-min(r,g,b)<48:counts['W']+=1
                 elif r>b+25 and g>b+15 and r>120:counts['']+=1
             value=max(counts,key=counts.get);score=counts[value]/32
             # FoxGo draws a black quarter-sector over the last white stone.
             if value=='W' and counts['W']>=20 and counts['W']+counts['B']>=30:score=.9
+            # Black stones also carry a white quarter-sector. Their grey
+            # highlight falls between the black/white thresholds, so include
+            # neutral shading while still requiring at least half dark samples.
+            if value=='B' and counts['B']>=16 and neutral>=30:score=.9
             if value in ('B','W'):
                 # A flat dialog/menu patch is not a stone: require surrounding wood.
                 wood=0
