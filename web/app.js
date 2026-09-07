@@ -143,6 +143,9 @@ function renderChoices() {
 function renderControls() {
   if(!state) return;
   renderConnector();
+  $('heart-opening').checked=!!state.settings.heartOpening;
+  $('heart-opening').disabled=pending||!!state.busy||state.mode!=='local';
+  $('heart-status').textContent=state.entertainment?.status||'Restart backend to load entertainment mode';
   const busy=pending||!!state.busy, online=state.mode!=='local';
   document.querySelectorAll('[data-local]').forEach(b=>b.disabled=busy||online||reviewing!==null);
   document.querySelectorAll('[data-engine]').forEach(b=>b.disabled=b.disabled||!state.engine);
@@ -257,3 +260,5 @@ if (document.modelContext?.registerTool) {
     }});
   window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});
 }
+
+$('heart-opening').onchange=async e=>{await action('entertainment-settings',{enabled:e.target.checked});renderControls();};

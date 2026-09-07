@@ -37,7 +37,7 @@ class Trainer:
         self.connector = 'direct'
         self.vision = None
         self.settings = dict(executable='', model='', config=str(ROOT/'config'/'gtp.cfg'),
-                             visits=200, seconds=2.0, aiColor='W', foxAccount='')
+                             visits=200, seconds=2.0, aiColor='W', foxAccount='', heartOpening=False)
         self.revision = 0
         saved = self.data_dir / 'settings.json'
         if saved.exists():
@@ -70,13 +70,16 @@ class Trainer:
     def state(self):
         with self.state_lock:
             b = self.board
+            from .entertainment import heart_opening
+            ai=(self.vision.ai if self.mode=='vision' and self.vision else self.fox_game.get('aiColor') if self.mode=='online' else self.settings['aiColor'])
+            opening=heart_opening(b,ai,self.settings.get('heartOpening',False)) if ai in ('B','W') else dict(status='Waiting for AI color',enabled=self.settings.get('heartOpening',False))
             return deepcopy(dict(size=b.size, komi=b.komi, rules=b.rules, grid=b.grid,
                 turn=b.turn, moves=b.moves, handicap=b.handicap, captures=b.captures,
                 initialStones=b.initial_stones,initialTurn=b.initial_turn,moveOffset=b.move_offset,
                 result=b.result, history=b.history, analysis=self.analysis,
                 evaluations=self.evaluations, analyses=self.analyses, logs=list(self.logs), busy=self.busy,
                 mode=self.mode, engine=bool(self.engine and self.engine.alive),
-                settings=self.settings, foxConnected=self.fox_connected,
+                settings=self.settings, entertainment=opening, foxConnected=self.fox_connected,
                 foxReady=self.fox_ready, foxPort=self.fox_port, foxReserve=self.fox_reserve,
                 foxGame=self.fox_game, connector=self.connector,
                 vision=self.vision.state() if self.vision else {}, revision=self.revision))
@@ -195,10 +198,21 @@ class Trainer:
             self.engine.command(f'play {c} {vertex}')
         self.commit_board(candidate)
 
+    def entertainment_move(self,c):
+        from .entertainment import heart_opening
+        opening=heart_opening(self.board,c,self.settings.get('heartOpening',False))
+        if opening['next']:self.log('info',opening['status']+' · '+opening['next'])
+        return opening['next']
+
     def generate(self, c=None):
         c = color(c or self.board.turn)
         with self.state_lock:
             self.board.turn = c
+        opening=self.entertainment_move(c)
+        if opening:
+            self.require_engine()
+            self.play(c,opening)
+            return opening
         reply = self.require_engine().command(
             f'kata-genmove_analyze {c} 25 maxmoves 8 rootInfo true ownership true',
             self.receive_analysis)
@@ -232,7 +246,12 @@ class Trainer:
         try:
             if self.mode != 'local' and name not in ('fox-stop',):
                 raise ValueError('Stop the FoxGo connection before changing the engine or local game.')
-            if name == 'engine-connect':
+            if name == 'entertainment-settings':
+                enabled=data.get('enabled')
+                if not isinstance(enabled,bool):raise ValueError('enabled must be a boolean.')
+                self.settings['heartOpening']=enabled
+                self.log('info','Heart opening '+('enabled' if enabled else 'disabled'))
+            elif name == 'engine-connect':
                 self.connect_engine(data)
                 self.analyze()
             elif name == 'engine-stop':

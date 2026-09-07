@@ -93,6 +93,16 @@ class VisionTests(unittest.TestCase):
         self.v.armed=True;self.stable_tick()
         self.desktop.board.play('B','D4');self.desktop.board.play('W','E5');self.stable_tick()
         self.assertEqual(self.app.board.moves,self.desktop.board.moves)
+
+    def test_heart_waits_for_visual_confirmation(self):
+        from trainer.entertainment import heart_points
+        self.app.settings['heartOpening']=True;self.v.armed=True
+        first=heart_points(9)[0];self.stable_tick()
+        self.assertEqual(self.v.pending.moves,[['B',first]])
+        self.assertEqual(self.app.board.moves,[])
+        self.assertFalse(any('analyze' in c for c in self.app.engine.commands))
+        self.desktop.board.play('B',first);self.stable_tick()
+        self.assertEqual(self.app.board.moves,[['B',first]])
     def test_timeout_does_not_repeat_click(self):
         self.v.armed=True;self.stable_tick();self.v.pending_at=time.monotonic()-6
         with self.assertRaises(ValueError):self.stable_tick()

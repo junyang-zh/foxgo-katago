@@ -267,7 +267,8 @@ class VisionConnector:
         def on_analysis(sample):
             if self.desktop.emergency():self.pause('Escape pressed')
             self.app.receive_analysis(sample)
-        reply=self.app.require_engine().command(f'kata-search_analyze_cancellable {self.ai} 25 maxmoves 8 rootInfo true ownership true',
+        opening=self.app.entertainment_move(self.ai)
+        reply=('play '+opening) if opening else self.app.require_engine().command(f'kata-search_analyze_cancellable {self.ai} 25 maxmoves 8 rootInfo true ownership true',
              on_analysis,cancel_event=self.cancel)
         if self.cancel.is_set() or self.stopped.is_set():return
         match=re.search(r'^play (\S+)\s*$',reply,re.M)

@@ -218,7 +218,8 @@ class FoxGame:
         budget = max(.01,budget-min(self.app.fox_reserve,budget/2))
         engine.command(f'kata-set-param maxTime {min(self.app.settings["seconds"],budget)}')
         started = time.monotonic()
-        reply = engine.command(
+        opening = self.app.entertainment_move(self.ai)
+        reply = ('play '+opening) if opening else engine.command(
             f'kata-search_analyze_cancellable {self.ai} 25 maxmoves 8 rootInfo true ownership true',
             self.app.receive_analysis,cancel_event=changed)
         if self.main:

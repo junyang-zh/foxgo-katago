@@ -13,13 +13,21 @@ python scripts/setup_katago.py
 python -m trainer.server
 ```
 
-Open **http://127.0.0.1:8173**, choose **Engine settings → Connect engine**. The installer fills in local paths. `./start.ps1` is an alternative launcher that can also use the Codex bundled Python runtime. Keep the terminal open while using the trainer; Ctrl+C stops the server and engine. Use `--port 8174` if the default port is occupied.
+Open **http://127.0.0.1:8173** after the backend reports KataGo ready. The installer fills in local paths and KataGo starts automatically. `./start.ps1` is an alternative launcher that can also use the Codex bundled Python runtime. Keep the terminal open while using the trainer; Ctrl+C stops the server and engine. Use `--port 8174` if the default port is occupied.
 
 For matches, `./start.ps1 -Background` runs the server independently of the launching terminal. It prints the process ID for stopping it and writes server output to `data/server.stdout.log` and `data/server.stderr.log`. KataGo starts automatically with the backend; start the desired connector in the panel after launch. If the backend stops, reconnect FoxGo after restarting it; a browser tab alone does not run the engine.
 
 The installer downloads official **KataGo v1.16.4 OpenCL for Windows** and **kata1-b28c512nbt-s13255194368-d5935380940**. This conservative OpenCL build supports the selected model and avoids a separate CUDA/cuDNN installation. The first start tunes GPU kernels and can take several minutes; later starts reuse its cache. On Linux/macOS, install your platform's KataGo build and set the executable/model/config paths manually. Paths with spaces are supported because subprocess arguments are passed as an array, without a shell.
 
 ## Local training
+
+### Entertainment / 让棋 heart opening
+
+Before a fresh game, stop any active connector and enable **Entertainment · 让棋 → Heart opening / 爱心开局**. This preference persists without reconnecting KataGo. Start the selected connector or a new local game normally.
+
+The AI spends its first 14 turns tracing a centered heart outline, on 9×9, 13×13, or 19×19 boards. After completion, KataGo chooses the remaining moves. It switches to KataGo early if the opponent plays on any planned heart point, captures an already placed heart stone, or makes the next placement illegal. Opponent moves elsewhere do not interrupt the opening. This is an entertainment opening, not fixed handicap stones or a calibrated rank setting.
+
+Local games and all three connectors share this policy. Screen and direct TCP moves advance the sequence only after confirmation; failed clicks do not consume heart moves. Imported positions with unknown history and games with handicap setup use KataGo immediately. A new game resets the sequence; the panel displays its progress and handover reason.
 
 - Choose 9×9, 13×13, or 19×19; Chinese or Japanese rules; komi; and 2–9 fixed handicap stones.
 - In Engine settings, choose which color KataGo plays, or select manual replies for two-player/review play. Search time and visits limit effort; they are not calibrated ranks.

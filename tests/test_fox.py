@@ -60,6 +60,17 @@ class FoxTests(unittest.TestCase):
         self.game.handle('FARESULT',['W+350'])
         self.assertEqual(self.app.board.result,'W+3.5')
 
+    def test_heart_move_uses_fox_confirmation(self):
+        self.app.settings['heartOpening']=True
+        self.start()
+        self.game.handle('FAMOVE',['1','W','1^4^4^B'])
+        packet,pending=self.game.search(threading.Event())
+        self.assertEqual(packet,encode('AFPLAY','W','2^2^2^W'))
+        self.assertEqual(self.app.board.moves,[['B','E5']])
+        self.game.pending=pending
+        self.game.handle('FAMOVE',['0','W','2^2^2^W'])
+        self.assertEqual(self.app.board.moves[-1],['W','C7'])
+
     def test_pass_duplicate_does_not_clear_pending(self):
         self.start(moves=())
         self.game.handle('FASKIP',['1','W'])
