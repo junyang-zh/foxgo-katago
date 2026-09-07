@@ -71,7 +71,7 @@ python -m pip install "Pillow>=11.2.1"
 python -m trainer.server
 ```
 
-This connector reads pixels from the standard yellow FoxGo board, recognizes black/white stones, follows legal moves and captures, asks KataGo for a move, and clicks its intersection. It does not require FoxGo to forward TCP game packets. Only one connector can control the board at a time.
+This connector reads pixels from the standard yellow FoxGo board, recognizes black/white stones, follows legal moves and captures, asks KataGo for a move, and clicks its intersection. It does not require FoxGo to forward TCP game packets. Only one connector can control the board at a time. Use the **Connection method** selector to choose direct TCP, FoxGTP relay, or screen vision; only the selected method’s controls are shown. Stop the current connection before switching methods.
 
 1. Stop any TCP listener in the trainer. Disconnect FoxGo's AI TCP connection and disable **Prohibit manual moves when AI connected**. Mouse input must be allowed.
 2. Connect KataGo and choose **your AI account's color**, board size and komi in **Screen / computer vision**. Click **Start automatic play** (or **Enable automatic moves**). Both start the same observation loop with automatic play enabled. There is no capture countdown or separate arming step.

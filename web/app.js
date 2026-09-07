@@ -3,6 +3,20 @@ const $ = id => document.getElementById(id);
 const letters = 'ABCDEFGHJKLMNOPQRST';
 const NS = 'http://www.w3.org/2000/svg';
 let state, reviewing = null, pending = false, selectedChoice = null, focusPoint = null, lastNotice = '', lastBoardKey = '';
+let selectedConnector = null;
+function renderConnector() {
+  const active=state.mode!=='local';
+  if(active)selectedConnector=state.mode==='vision'?'vision':state.connector;
+  else if(selectedConnector===null)selectedConnector=['direct','foxgtp','vision'].includes(state.connector)?state.connector:'direct';
+  $('connector-type').value=selectedConnector;
+  $('tcp-controls').hidden=selectedConnector==='vision';
+  $('vision-controls').hidden=selectedConnector!=='vision';
+  $('direct-status-controls').hidden=selectedConnector!=='direct';
+  $('direct-guide').hidden=selectedConnector!=='direct';
+  $('relay-guide').hidden=selectedConnector!=='foxgtp';
+  $('tcp-method-detail').textContent=selectedConnector==='foxgtp'?'FoxGo → FoxGTP port 6001 → trainer port 8001.':'FoxGo → trainer TCP port 6001.';
+  $('connector-help').textContent=active?'Stop the current connection before switching methods.':'Choose one method. Only its controls are shown.';
+}
 function node(tag, attrs = {}, text = '') {
   const el = document.createElementNS(NS, tag);
   for (const [k,v] of Object.entries(attrs)) el.setAttribute(k,v);
@@ -128,6 +142,7 @@ function renderChoices() {
 }
 function renderControls() {
   if(!state) return;
+  renderConnector();
   const busy=pending||!!state.busy, online=state.mode!=='local';
   document.querySelectorAll('[data-local]').forEach(b=>b.disabled=busy||online||reviewing!==null);
   document.querySelectorAll('[data-engine]').forEach(b=>b.disabled=b.disabled||!state.engine);
@@ -138,6 +153,7 @@ function renderControls() {
   $('fox-sync').disabled=pending||!state.foxConnected||state.connector!=='direct';
   $('fox-port').disabled=online||busy;
   $('busy-label').textContent=state.busy?' / '+state.busy:'';
+  window.renderVision?.(state);
 }
 function render() {
   if(!state) return;
@@ -156,7 +172,7 @@ function render() {
   const fg=state.connector==='foxgtp'&&state.mode==='online'?{status:state.foxConnected?(state.foxReady?'FoxGTP game synchronized':'FoxGTP connected · waiting for game commands'):'Waiting for FoxGTP on the engine port'}:state.foxGame||{};
   $('fox-detail').textContent=[fg.status,fg.aiColor?`AI ${fg.aiColor} · main ${fg.mainTime}s · byo ${fg.byoTime}s × ${fg.periods}`:'',fg.pendingMove?`Awaiting confirmation: ${fg.pendingMove}`:''].filter(Boolean).join(' · ');
   if(state.mode==='online') {$('fox-reserve').value=state.foxReserve;$('fox-port').value=state.foxPort;$('connector-type').value=state.connector;}
-  renderBoard();renderChart();renderChoices();renderControls();renderLogs();window.renderVision?.(state);
+  renderBoard();renderChart();renderChoices();renderControls();renderLogs();
   if(!lastNotice&&!pending) showNotice(state.busy?`Working: ${state.busy}…`:reviewing!==null?'Review mode. Return to Live to play.':state.mode==='online'?'Online observer: FoxGo controls the game.':state.result||(!state.engine?'Two-player practice is available. Connect KataGo for AI play and analysis.':'Click an intersection to play. Candidate numbers show KataGo’s preferred moves.'));
 }
 function renderLogs() {
@@ -201,7 +217,12 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();$('settings-error').tex
 $('engine-stop').onclick=async()=>{if(await action('engine-stop'))$('settings-dialog').close();};
 $('new-open').onclick=()=>$('new-dialog').showModal();
 $('new-form').onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));$('new-dialog').close();await action('new',data);};
-$('connector-type').onchange=()=>{state.foxPort=$('connector-type').value==='foxgtp'?8001:6001;$('fox-port').value=state.foxPort;};
+$('connector-type').onchange=()=>{
+  if(!state||pending||state.busy||state.mode!=='local'){if(state)renderControls();return;}
+  selectedConnector=$('connector-type').value;
+  if(selectedConnector!=='vision')$('fox-port').value=selectedConnector==='foxgtp'?8001:6001;
+  renderControls();
+};
 $('fox-sync').onclick=()=>action('fox-sync',{color:$('fox-color').value});
 $('fox-toggle').onclick=()=>action(state.mode==='online'?'fox-stop':'fox-start',{port:Number($('fox-port').value),reserve:Number($('fox-reserve').value),connector:$('connector-type').value});
 function review(n){reviewing=Math.max(0,Math.min(state.moves.length,n));selectedChoice=null;render();}
