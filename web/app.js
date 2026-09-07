@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const letters = 'ABCDEFGHJKLMNOPQRST';
 const NS = 'http://www.w3.org/2000/svg';
 let state, reviewing = null, pending = false, selectedChoice = null, focusPoint = null, lastNotice = '', lastBoardKey = '';
-let selectedConnector = null;
+let selectedConnector = null, switchingConnector = false;
 function renderConnector() {
   const active=state.mode!=='local';
   if(active)selectedConnector=state.mode==='vision'?'vision':state.connector;
@@ -15,7 +15,7 @@ function renderConnector() {
   $('direct-guide').hidden=selectedConnector!=='direct';
   $('relay-guide').hidden=selectedConnector!=='foxgtp';
   $('tcp-method-detail').textContent=selectedConnector==='foxgtp'?'FoxGo → FoxGTP port 6001 → trainer port 8001.':'FoxGo → trainer TCP port 6001.';
-  $('connector-help').textContent=active?'Stop the current connection before switching methods.':'Choose one method. Only its controls are shown.';
+  $('connector-help').textContent=switchingConnector?'Stopping the current connection…':active?'Selecting another method stops this connection first.':'Choose one method. Only its controls are shown.';
 }
 function node(tag, attrs = {}, text = '') {
   const el = document.createElementNS(NS, tag);
@@ -148,7 +148,7 @@ function renderControls() {
   document.querySelectorAll('[data-engine]').forEach(b=>b.disabled=b.disabled||!state.engine);
   $('settings-open').disabled=busy||online;
   $('fox-toggle').disabled=state.mode==='vision'||pending||(!online&&(busy||!state.engine));
-  $('connector-type').disabled=online||busy;
+  $('connector-type').disabled=pending||switchingConnector;
   $('fox-reserve').disabled=online||busy;
   $('fox-sync').disabled=pending||!state.foxConnected||state.connector!=='direct';
   $('fox-port').disabled=online||busy;
@@ -217,11 +217,16 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();$('settings-error').tex
 $('engine-stop').onclick=async()=>{if(await action('engine-stop'))$('settings-dialog').close();};
 $('new-open').onclick=()=>$('new-dialog').showModal();
 $('new-form').onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));$('new-dialog').close();await action('new',data);};
-$('connector-type').onchange=()=>{
-  if(!state||pending||state.busy||state.mode!=='local'){if(state)renderControls();return;}
-  selectedConnector=$('connector-type').value;
-  if(selectedConnector!=='vision')$('fox-port').value=selectedConnector==='foxgtp'?8001:6001;
-  renderControls();
+$('connector-type').onchange=async()=>{
+  if(!state||pending||switchingConnector){if(state)renderControls();return;}
+  const requested=$('connector-type').value;
+  if(requested===selectedConnector)return;
+  switchingConnector=true;
+  try {
+    if(state.mode!=='local'&&!await action(state.mode==='vision'?'vision-stop':'fox-stop'))return;
+    selectedConnector=requested;
+    if(selectedConnector!=='vision')$('fox-port').value=selectedConnector==='foxgtp'?8001:6001;
+  } finally {switchingConnector=false;renderControls();}
 };
 $('fox-sync').onclick=()=>action('fox-sync',{color:$('fox-color').value});
 $('fox-toggle').onclick=()=>action(state.mode==='online'?'fox-stop':'fox-start',{port:Number($('fox-port').value),reserve:Number($('fox-reserve').value),connector:$('connector-type').value});
