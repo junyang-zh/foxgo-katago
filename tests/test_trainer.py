@@ -77,6 +77,14 @@ class IntegrationTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.app=Trainer(self.tmp.name)
         self.app.engine=GTP([sys.executable,'-u',FIXTURE])
     def tearDown(self): self.app.close();self.tmp.cleanup()
+    def test_partial_analysis_keeps_ownership_only_for_same_position(self):
+        ownership=[.5]*(self.app.board.size**2)
+        self.app.receive_analysis({'ownership':ownership,'choices':[]})
+        self.app.receive_analysis({'choices':[]})
+        self.assertEqual(self.app.analyses[0]['ownership'],ownership)
+        self.app.play('B','D4')
+        self.app.receive_analysis({'choices':[]})
+        self.assertNotIn('ownership',self.app.analyses[1])
     def test_local_ai_undo_persistence(self):
         self.app.action('new',{'size':9})
         self.app.action('play',{'vertex':'E5'})

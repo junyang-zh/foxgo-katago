@@ -167,6 +167,11 @@ class Trainer:
         with self.state_lock:
             turn, move = self.board.turn, len(self.board.moves)
             analysis.update(turn=turn, moveNumber=move)
+            # Some streaming frames omit ownership; keep this position's last
+            # estimate instead of dropping it between search updates.
+            previous=self.analyses.get(move,{})
+            if not analysis.get('ownership') and previous.get('ownership'):
+                analysis['ownership']=deepcopy(previous['ownership'])
             root = analysis.get('root', {})
             if 'winrate' in root and ('scoreLead' in root or 'scoreMean' in root):
                 wr = float(root['winrate'])

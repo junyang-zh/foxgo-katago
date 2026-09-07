@@ -50,9 +50,17 @@ async function action(name, data = {}) {
 }
 function atMove() {return reviewing === null ? state.moves.length : Math.min(reviewing,state.moves.length);}
 function currentAnalysis() {return state.analyses?.[atMove()] || (state.analysis?.moveNumber === atMove() ? state.analysis : {});}
+function territoryAnalysis() {
+  const move=atMove();
+  return [...Object.values(state.analyses||{}),state.analysis||{}]
+    .filter(a=>Number.isInteger(a.moveNumber)&&a.moveNumber<=move&&
+      ['B','W'].includes(a.turn)&&a.ownership?.length===state.size*state.size)
+    .sort((a,b)=>b.moveNumber-a.moveNumber)[0]||{};
+}
 function renderBoard() {
   const move = atMove(), snapshot = state.history[move] || state.history.at(-1), analysis = currentAnalysis();
-  const key = JSON.stringify([state.revision,move,analysis,$('hints').checked,$('ownership').checked,selectedChoice,focusPoint,state.grid]);
+  const territory=territoryAnalysis();
+  const key = JSON.stringify([state.revision,move,analysis,territory,$('hints').checked,$('ownership').checked,selectedChoice,focusPoint,state.grid]);
   if (key === lastBoardKey) return;
   lastBoardKey = key;
   const svg = $('board'); svg.replaceChildren();
@@ -71,9 +79,11 @@ function renderBoard() {
   }
   const stars=n===19?[3,9,15]:n===13?[3,6,9]:[2,4,6];
   for(const y of stars) for(const x of stars) if(n!==9 || x===y || x+y===8) svg.append(node('circle',{cx:margin+x*step,cy:margin+y*step,r:n===19?3.3:4,fill:'#6d4e2c'}));
-  const own=analysis.ownership || [];
+  const own=territory.ownership || [];
+  $('territory-status').hidden=!$('ownership').checked;
+  $('territory-status').textContent=own.length?`Territory · ${territory.moveNumber===move?'estimate':'latest estimate'} at move ${territory.moveNumber+(state.moveOffset||0)}`:'Territory · waiting for the first analysis';
   if($('ownership').checked && own.length===n*n) own.forEach((v,i)=>{
-    const black=analysis.turn==='B'?v:-v;
+    const black=territory.turn==='B'?v:-v;
     if(Math.abs(black)>.15) svg.append(node('rect',{x:margin+(i%n)*step-step*.22,y:margin+Math.floor(i/n)*step-step*.22,width:step*.44,height:step*.44,fill:black>0?'#17232a':'#fff',opacity:Math.abs(black)*.65}));
   });
   for(let y=0;y<n;y++) for(let x=0;x<n;x++) if(snapshot.grid[y][x]) svg.append(node('circle',{cx:margin+x*step,cy:margin+y*step,r,class:snapshot.grid[y][x]==='B'?'stone-b':'stone-w'}));
