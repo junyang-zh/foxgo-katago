@@ -145,7 +145,7 @@ class Trainer:
             self.engine = None
         command = [settings['executable'], 'gtp', '-model', settings['model'],
             '-config', settings['config'], '-override-config',
-            f'maxVisits={settings["visits"]},maxTime={settings["seconds"]},reportAnalysisWinratesAs=SIDETOMOVE,ponderingEnabled=false']
+            f'maxVisits={settings["visits"]},maxTime={settings["seconds"]},reportAnalysisWinratesAs=SIDETOMOVE,ponderingEnabled=false,allowResignation=false']
         # First OpenCL launch can compile and tune kernels for several minutes.
         engine = GTP(command, self.log, timeout=600, cwd=ROOT)
         self.engine = engine
