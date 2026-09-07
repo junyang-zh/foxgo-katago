@@ -28,11 +28,12 @@ $('vision-pass').onclick=()=>{if(confirm('Confirm that the player whose turn is 
 window.renderVision=s=>{
   const v=s.vision||{}, running=!!v.running;
   if(!presenceLoaded){$('vision-presence').value=s.settings.visionPresence?'on':'off';$('vision-presence-port').value=s.settings.visionPresencePort||6001;presenceLoaded=true;}
-  $('vision-presence').disabled=pending||running;
-  $('vision-presence-port').disabled=pending||running;
+  const presenceSupported=Object.prototype.hasOwnProperty.call(s,'presence');
+  $('vision-presence').disabled=pending||running||!presenceSupported;
+  $('vision-presence-port').disabled=pending||running||!presenceSupported;
   $('vision-presence-port-label').hidden=$('vision-presence').value!=='on';
   const p=s.presence||{};
-  $('vision-presence-status').textContent=p.listening?`${p.connected?'FoxGo connected':'Listening'} at 127.0.0.1:${p.port} · CV controls moves${p.lastMessage?' · '+p.lastMessage:''}`:($('vision-presence').value==='on'?'Starts with screen tracking. Stop tracking to change this option.':'AI presence listener off');
+  $('vision-presence-status').textContent=!presenceSupported?'Backend update required: restart the trainer to enable the AI presence listener.':p.listening?`${p.connected?'FoxGo connected':'Listening'} at 127.0.0.1:${p.port} · CV controls moves${p.lastMessage?' · '+p.lastMessage:''}`:($('vision-presence').value==='on'?'Starts with screen tracking. Stop tracking to change this option.':'AI presence listener off');
   $('vision-badge').textContent=v.armed?'Automatic moves enabled':running?'Preview / paused':'Stopped';
   $('vision-status').textContent=[v.status,v.historyNote,v.confidence!==undefined?`Minimum confidence ${(v.confidence*100).toFixed(0)}%`:'',v.pendingMove?`Pending ${v.pendingMove}`:''].filter(Boolean).join(' · ');
   $('vision-role').textContent=v.roleStatus||'Waiting to identify your account in FoxGo';
