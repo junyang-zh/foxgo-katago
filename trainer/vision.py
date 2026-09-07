@@ -251,6 +251,10 @@ class VisionConnector:
         if info.get('moveNumber')!=self.app.board.move_offset+len(self.app.board.moves):
             raise ValueError('FoxGo move counter disagrees with tracked history; check for a pass or missed move.')
         self.room=info['room']
+        if hasattr(self.desktop,'prepare_click'):
+            try:self.desktop.prepare_click(self.target['hwnd'])
+            except ValueError as exc:
+                self.status['status']=str(exc);return
         # Search does not mutate the engine board; the click must be confirmed.
         self.app.busy='Vision: thinking'
         self.cancel.clear()

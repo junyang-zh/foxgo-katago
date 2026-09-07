@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from trainer.vision_native import WindowsDesktop
 
 
@@ -32,3 +32,9 @@ class InputTests(unittest.TestCase):
         d,info,cursor=self.desktop();d.u.SetCursorPos.side_effect=lambda x,y:1
         with self.assertRaises(ValueError):d.click(1,332,1077,info)
         d.u.SendInput.assert_not_called()
+
+    def test_elevated_foxgo_is_reported_before_input(self):
+        d,info,cursor=self.desktop()
+        with patch('trainer.windows_privileges.integrity_level',side_effect=[12288,8192]):
+            with self.assertRaisesRegex(ValueError,'Administrator'):d.prepare_click(1)
+        d.u.SetForegroundWindow.assert_not_called();d.u.SendInput.assert_not_called()

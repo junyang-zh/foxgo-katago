@@ -82,7 +82,11 @@ class WindowsDesktop:
         return image,info
 
     def prepare_click(self, hwnd):
-        self.describe(hwnd)
+        info=self.describe(hwnd)
+        from .windows_privileges import integrity_level
+        target_level=integrity_level(info['pid']);our_level=integrity_level(os.getpid())
+        if target_level is not None and our_level is not None and target_level>our_level:
+            raise ValueError('Windows blocks input: FoxGo runs as Administrator, but the trainer does not. Restart with start.ps1 -Administrator, or run FoxGo without Administrator privileges.')
         if self.u.GetForegroundWindow()!=hwnd:self.u.SetForegroundWindow(hwnd)
         if self.u.GetForegroundWindow()!=hwnd:
             raise ValueError('Windows prevented FoxGo activation; select FoxGo once to allow input.')
