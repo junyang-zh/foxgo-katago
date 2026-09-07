@@ -1,6 +1,9 @@
 [project]
 name = "foxgo-katago"
 version = "1.0.0"
-description = "Local personal Go trainer and official FoxGTP bridge for KataGo"
+description = "Personal KataGo trainer with direct FoxGo, FoxGTP and screen connectors"
 requires-python = ">=3.10"
 dependencies = []
+
+[project.optional-dependencies]
+vision = ["Pillow>=11.2.1"]

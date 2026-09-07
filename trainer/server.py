@@ -44,9 +44,12 @@ def create_server(app, port=8173):
                 with app.state_lock:
                     sgf = app.board.sgf()
                 return self.send(200,sgf,'application/x-go-sgf; charset=utf-8')
+            if route == '/api/vision-image':
+                if not app.vision or not app.vision.preview:return self.send(404,'{}')
+                return self.send(200,app.vision.preview,'image/png')
             if route == '/api/logs':
                 return self.send(200,json.dumps(app.state()['logs'],indent=2,ensure_ascii=False))
-            static = {'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+            static = {'/':'index.html','/app.js':'app.js','/style.css':'style.css','/vision.js':'vision.js'}
             if route not in static:
                 return self.send(404,'{"error":"Not found"}')
             path = ROOT / 'web' / static[route]

@@ -34,6 +34,8 @@ class Trainer:
         self.fox_port = 6001
         self.fox_reserve = 1.0
         self.fox_game = {'status': 'Offline'}
+        self.connector = 'direct'
+        self.vision = None
         self.settings = dict(executable='', model='', config=str(ROOT/'config'/'gtp.cfg'),
                              visits=200, seconds=2.0, aiColor='W')
         self.revision = 0
@@ -73,7 +75,8 @@ class Trainer:
                 mode=self.mode, engine=bool(self.engine and self.engine.alive),
                 settings=self.settings, foxConnected=self.fox_connected,
                 foxReady=self.fox_ready, foxPort=self.fox_port, foxReserve=self.fox_reserve,
-                foxGame=self.fox_game, revision=self.revision))
+                foxGame=self.fox_game, connector=self.connector,
+                vision=self.vision.state() if self.vision else {}, revision=self.revision))
 
     def save(self):
         with self.state_lock:
@@ -195,8 +198,10 @@ class Trainer:
         return vertex.lower() if vertex in ('PASS','RESIGN') else vertex
 
     def action(self, name, data):
+        if name.startswith('vision-'):
+            return self.vision_action(name,data)
         if name == 'fox-sync':
-            if not self.fox_server:
+            if not self.fox_server or self.connector != 'direct':
                 raise ValueError('Start the FoxGo listener first.')
             self.fox_server.request_status(data.get('color'))
             return self.state()
@@ -206,7 +211,7 @@ class Trainer:
             raise ValueError('An operation is in progress. Wait for it to finish.')
         self.busy = name
         try:
-            if self.mode == 'online' and name not in ('fox-stop',):
+            if self.mode != 'local' and name not in ('fox-stop',):
                 raise ValueError('Stop the FoxGo connection before changing the engine or local game.')
             if name == 'engine-connect':
                 self.connect_engine(data)
@@ -284,7 +289,10 @@ class Trainer:
                 self.log('score', score)
             elif name == 'fox-start':
                 from .fox import FoxServer
+                from .foxgtp import FoxGTPServer
                 self.require_engine()
+                kind=data.get('connector','direct')
+                if kind not in ('direct','foxgtp'):raise ValueError('Select direct TCP or FoxGTP.')
                 port = int(data.get('port',6001))
                 reserve = float(data.get('reserve',1))
                 if not math.isfinite(reserve) or not .1 <= reserve <= 10:
@@ -293,7 +301,7 @@ class Trainer:
                     raise EngineError('Direct FoxGo play requires KataGo cancellable search support.')
                 if not 1024 <= port <= 65535:
                     raise ValueError('Choose a TCP port from 1024 to 65535.')
-                server = FoxServer(self, port)
+                server = (FoxServer if kind=='direct' else FoxGTPServer)(self, port)
                 try:
                     self.engine.command('kata-set-rules chinese')
                 except Exception:
@@ -304,11 +312,12 @@ class Trainer:
                 self.evaluations = {}
                 self.analyses = {}
                 self.fox_server, self.fox_port = server, port
+                self.connector=kind
                 self.fox_reserve = reserve
                 self.fox_game = {'status':'Listening · connect FoxGo'}
                 self.mode = 'online'
                 server.start()
-                self.log('fox', f'Listening for FoxGo directly on 127.0.0.1:{port}.')
+                self.log('fox', f'Listening for {kind} on 127.0.0.1:{port}.')
             elif name == 'fox-stop':
                 if self.fox_server:
                     self.fox_server.stop()
@@ -332,9 +341,37 @@ class Trainer:
         return self.state()
 
     def close(self):
+        if self.vision:self.vision.stop()
         if self.fox_server:
             self.fox_server.stop()
         with self.operation:
             pass
         if self.engine:
             self.engine.close()
+
+    def vision_action(self,name,data):
+        from .vision import VisionConnector
+        if self.mode=='online':raise ValueError('Stop the TCP connector before using vision.')
+        if not self.vision:self.vision=VisionConnector(self)
+        v=self.vision
+        if name=='vision-pause':v.pause();return self.state()
+        if name=='vision-stop':v.stop()
+        if not self.operation.acquire(timeout=10):raise ValueError('Wait for the current engine operation.')
+        try:
+            if name=='vision-windows':return {**self.state(),'windows':v.desktop.windows()}
+            if name in ('vision-capture','vision-calibrate','vision-start') and v.started:
+                raise ValueError('Stop vision before changing calibration or restarting.')
+            if name=='vision-capture':
+                time.sleep(3)  # Allows the user to bring FoxGo forward after pressing Capture.
+                v.capture(data['hwnd'])
+            elif name=='vision-calibrate':v.configure(data)
+            elif name=='vision-start':
+                v.start(data);self.mode='vision';self.connector='vision'
+            elif name=='vision-arm':v.arm()
+            elif name=='vision-pass':
+                if not v.started or not v.initialized:raise ValueError('Start tracking first.')
+                v.manual_pass()
+            elif name=='vision-stop':self.mode='local'
+            else:raise ValueError('Unknown vision action.')
+        finally:self.operation.release()
+        return self.state()

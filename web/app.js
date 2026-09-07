@@ -128,13 +128,14 @@ function renderChoices() {
 }
 function renderControls() {
   if(!state) return;
-  const busy=pending||!!state.busy, online=state.mode==='online';
+  const busy=pending||!!state.busy, online=state.mode!=='local';
   document.querySelectorAll('[data-local]').forEach(b=>b.disabled=busy||online||reviewing!==null);
   document.querySelectorAll('[data-engine]').forEach(b=>b.disabled=b.disabled||!state.engine);
   $('settings-open').disabled=busy||online;
-  $('fox-toggle').disabled=pending||(!online&&(busy||!state.engine));
+  $('fox-toggle').disabled=state.mode==='vision'||pending||(!online&&(busy||!state.engine));
+  $('connector-type').disabled=online||busy;
   $('fox-reserve').disabled=online||busy;
-  $('fox-sync').disabled=pending||!state.foxConnected;
+  $('fox-sync').disabled=pending||!state.foxConnected||state.connector!=='direct';
   $('fox-port').disabled=online||busy;
   $('busy-label').textContent=state.busy?' / '+state.busy:'';
 }
@@ -142,7 +143,7 @@ function render() {
   if(!state) return;
   $('engine-status').textContent=state.engine?'KataGo connected':'KataGo offline';
   $('engine-dot').classList.toggle('on',state.engine);
-  $('mode-label').textContent=state.mode==='online'?'FOXGO · ONLINE OBSERVER':'LOCAL PRACTICE';
+  $('mode-label').textContent=state.mode==='vision'?'FOXGO · SCREEN CONNECTOR':state.mode==='online'?'FOXGO · ONLINE OBSERVER':'LOCAL PRACTICE';
   const snap=state.history[atMove()]||state.history.at(-1);
   $('turn-label').textContent=state.result&&reviewing===null?state.result:`${snap.turn==='B'?'Black':'White'} to play`;
   $('black-info').textContent=`${snap.captures.B} captures${state.settings.aiColor==='B'?' · AI':''}`;
@@ -150,18 +151,17 @@ function render() {
   $('game-meta').textContent=`${state.size} × ${state.size} · ${state.rules==='chinese'?'Chinese':'Japanese'} · Komi ${state.komi}`;
   $('history').max=state.moves.length; $('history').value=atMove();
   $('move-number').textContent=`Move ${atMove()} / ${state.moves.length}`;
-  $('fox-status').textContent=state.foxConnected?(state.foxReady?'FoxGo synced':'FoxGo connected'):state.mode==='online'?'Listening':'Offline';
+  $('fox-status').textContent=state.foxConnected?((state.connector==='foxgtp'?'FoxGTP':'FoxGo')+(state.foxReady?' synced':' connected')):state.mode==='online'?'Listening':'Offline';
   $('fox-toggle').textContent=state.mode==='online'?'Stop listener':'Start listener';
-  const fg=state.foxGame||{};
+  const fg=state.connector==='foxgtp'&&state.mode==='online'?{status:state.foxConnected?(state.foxReady?'FoxGTP game synchronized':'FoxGTP connected · waiting for game commands'):'Waiting for FoxGTP on the engine port'}:state.foxGame||{};
   $('fox-detail').textContent=[fg.status,fg.aiColor?`AI ${fg.aiColor} · main ${fg.mainTime}s · byo ${fg.byoTime}s × ${fg.periods}`:'',fg.pendingMove?`Awaiting confirmation: ${fg.pendingMove}`:''].filter(Boolean).join(' · ');
-  if(document.activeElement!==$('fox-reserve')) $('fox-reserve').value=state.foxReserve;
-  if(document.activeElement!==$('fox-port')) $('fox-port').value=state.foxPort;
-  renderBoard();renderChart();renderChoices();renderControls();renderLogs();
+  if(state.mode==='online') {$('fox-reserve').value=state.foxReserve;$('fox-port').value=state.foxPort;$('connector-type').value=state.connector;}
+  renderBoard();renderChart();renderChoices();renderControls();renderLogs();window.renderVision?.(state);
   if(!lastNotice&&!pending) showNotice(state.busy?`Working: ${state.busy}…`:reviewing!==null?'Review mode. Return to Live to play.':state.mode==='online'?'Online observer: FoxGo controls the game.':state.result||(!state.engine?'Two-player practice is available. Connect KataGo for AI play and analysis.':'Click an intersection to play. Candidate numbers show KataGo’s preferred moves.'));
 }
 function renderLogs() {
   const box=$('logs'), bottom=box.scrollTop+box.clientHeight>=box.scrollHeight-25;
-  const logs=$('debug').checked?state.logs:state.logs.filter(l=>['info','error','warning','fox','score','fox score'].includes(l.level));
+  const logs=$('debug').checked?state.logs:state.logs.filter(l=>['info','error','warning','fox','score','fox score','vision'].includes(l.level));
   box.replaceChildren();
   logs.slice(-100).forEach(l=>{const row=document.createElement('div');row.className='log-row'+(l.level==='error'?' error':'');[l.time,l.level,l.message].forEach((s,i)=>{const span=document.createElement('span');span.className=['log-time','log-level','log-message'][i];span.textContent=s;row.append(span);});box.append(row);});
   if(bottom) box.scrollTop=box.scrollHeight;
@@ -179,7 +179,7 @@ async function poll() {
   setTimeout(poll,900);
 }
 function playPoint(x,y) {
-  if(!state || pending || state.busy || state.mode==='online'||reviewing!==null) return;
+  if(!state || pending || state.busy || state.mode!=='local'||reviewing!==null) return;
   action('play',{vertex:letters[x]+(state.size-y)});
 }
 $('board').addEventListener('click',event=>{
@@ -201,8 +201,9 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();$('settings-error').tex
 $('engine-stop').onclick=async()=>{if(await action('engine-stop'))$('settings-dialog').close();};
 $('new-open').onclick=()=>$('new-dialog').showModal();
 $('new-form').onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));$('new-dialog').close();await action('new',data);};
+$('connector-type').onchange=()=>{state.foxPort=$('connector-type').value==='foxgtp'?8001:6001;$('fox-port').value=state.foxPort;};
 $('fox-sync').onclick=()=>action('fox-sync',{color:$('fox-color').value});
-$('fox-toggle').onclick=()=>action(state.mode==='online'?'fox-stop':'fox-start',{port:Number($('fox-port').value),reserve:Number($('fox-reserve').value)});
+$('fox-toggle').onclick=()=>action(state.mode==='online'?'fox-stop':'fox-start',{port:Number($('fox-port').value),reserve:Number($('fox-reserve').value),connector:$('connector-type').value});
 function review(n){reviewing=Math.max(0,Math.min(state.moves.length,n));selectedChoice=null;render();}
 $('history').oninput=e=>review(Number(e.target.value));$('back').onclick=()=>review(atMove()-1);$('forward').onclick=()=>review(atMove()+1);
 $('live').onclick=()=>{reviewing=null;selectedChoice=null;render();};

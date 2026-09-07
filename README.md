@@ -1,6 +1,6 @@
 # FoxGo / KataGo — Personal Go Studio
 
-A local Go trainer with a browser board, real KataGo analysis, and a **direct FoxGo TCP controller**. The app never logs into FoxGo itself. FoxGo controls online games through its AI-enabled account interface.
+A local Go trainer with a browser board, real KataGo analysis, and three connectors: **direct FoxGo TCP, official FoxGTP relay, and calibrated screen vision**. The app never logs into FoxGo itself. FoxGo controls online games through its AI-enabled account interface.
 
 ## Start on Windows
 
@@ -43,7 +43,7 @@ Python trainer ── GTP stdin/stdout ── KataGo
 ```
 
 1. Log in to FoxGo with your AI-enabled account.
-2. Connect KataGo in the panel, then click **Start listener**. Default port: **6001**. Close FoxGTP if it occupies this port; it is no longer needed.
+2. Connect KataGo in the panel, then click **Start listener**. Default port: **6001**. Stop FoxGTP’s listener if it occupies this port.
 3. In FoxGo's AI management, connect to **127.0.0.1:6001** (or the selected port). Enable **Use Chinese rules after AI connection** and **Prohibit manual when AI connected**.
 4. Start matches in FoxGo. Invitations and adjudication remain in the official client. The panel displays the connection, clocks, confirmed board, pending move, and analysis.
 5. Click **Stop listener** to disconnect and return to local practice.
@@ -56,7 +56,38 @@ KataGo searches without changing its board. Only FoxGo-confirmed moves are appli
 
 Online curves contain analysis from AI turns. Reconnection requires fresh rules and a complete snapshot. The 2022 guide does not define pass records in snapshots: ambiguous pass histories are rejected rather than guessed. Same-connection snapshots can retain already-confirmed pass history when all indexed stones match. A fresh game may be necessary after reconnecting a game containing passes.
 
-This implementation targets **Fox Go AI Protocol v1.05 (2022-06-06)**. Automated TCP peers and the installed real KataGo validate the implementation; this is separate from completing a live FoxGo match. No FoxGTP relay adapter or raw GTP TCP endpoint remains.
+This implementation targets **Fox Go AI Protocol v1.05 (2022-06-06)**. Automated TCP peers and the installed real KataGo validate the implementation; this is separate from completing a live FoxGo match. Choose the separate FoxGTP connector when using the official relay.
+
+## Official FoxGTP relay
+
+Choose **Official FoxGTP relay** in the TCP connector selector, then start the listener on **8001**. In FoxGTP select **Work → Synchronize AI to FoxClient** and **Communication → TCP/IP: FoxGTP → AI Engine**. Connect its engine side to **127.0.0.1:8001**, and listen for FoxGo on **6001**. FoxGo connects to **127.0.0.1:6001**. Leave common Go byo-yomi unchecked in FoxGTP and reserve one second for transmission. The panel mirrors GTP commands and collects KataGo analysis. This is now part of the main application; the temporary comparison checkout is no longer needed.
+
+## Screen / computer vision connector (Windows)
+
+Install the optional capture dependency using the same Python that starts the trainer:
+
+```powershell
+python -m pip install "Pillow>=11.2.1"
+python -m trainer.server
+```
+
+This connector reads pixels from the standard yellow FoxGo board, recognizes black/white stones, follows legal moves and captures, asks KataGo for a move, and clicks its intersection. It does not require FoxGo to forward TCP game packets. Only one connector can control the board at a time.
+
+1. Stop any TCP listener in the trainer. Disconnect FoxGo's AI TCP connection and disable **Prohibit manual moves when AI connected**. Mouse input must be allowed.
+2. Connect KataGo. In **Screen / computer vision**, click **Find FoxGo**, select the main game window, then **Capture in 3 seconds**. Bring FoxGo to the foreground immediately and move the pointer away from the board.
+3. Return to the panel. Click the **top-left grid intersection**, then the **bottom-right grid intersection** in the captured image. These are line intersections, not the wooden board corners. Select board size and click **Read calibrated board**.
+4. Inspect the overlay: green is empty, blue is black, pink is white, red is uncertain. Recalibrate if any intersection is wrong. Hover highlights, dialogs and overlays must not cover the board.
+5. Select **your AI account's color** and komi. Click **Track fresh game**, then bring FoxGo forward. The connector requires three consistent frames of an **empty board** before tracking begins. Mid-game attachment and handicap setup are not supported in this first version.
+6. Return to the panel and click **Enable automatic moves**, then bring FoxGo forward within three seconds. Keep the window visible, in front, in the same position and size. The connector checks the Chinese FoxGo title for an active match, room, and move count before clicking. An ended game, a new room, or a move-count mismatch pauses automatic play.
+7. **Hold Escape** to pause, or use **Pause clicks** in the panel. A lost foreground window, changed geometry, uncertain image, or unconfirmed click also pauses. The connector never retries a click automatically. Stop tracking before switching games or recalibrating.
+
+A click is committed to KataGo only after its stone and captures are seen. A fast opponent reply can confirm both consecutive legal moves. After clicking, the pointer is parked over the title bar to avoid FoxGo's hover marker. Screen polling and three-frame confirmation add about one second; this connector does not read clocks, so use a conservative engine search limit (for example 1–2 seconds) and avoid very fast time controls.
+
+Passes and resignations cannot be reliably inferred from unchanged board pixels. If KataGo recommends either, automatic play pauses and shows the recommendation. Perform the action in FoxGo yourself. For **each actual pass by either player**, pause and click **Confirm a manual pass** to advance the tracked turn; do not use this while a player is merely thinking. After resignation or game end, stop tracking. Scoring and result acceptance remain manual in FoxGo.
+
+Calibration and arming are session-only. Restarting never resumes automatic clicking. Captured calibration images remain in local process memory and are served only by the local panel. Run the trainer and FoxGo at the same Windows privilege level. The recognizer is tuned for the standard yellow board and Chinese game-window titles; alternate themes/locales need adaptation. It uses confidence thresholds and surrounding-board checks, not a trained OCR model. These checks reduce errors but do not prove screen recognition is perfect.
+
+Validation includes synthetic board images, captures, overlays, fast replies, cancellation, no-retry behavior and a read-only capture of the installed FoxGo window at 200% DPI. Completing a live match through mouse control has not yet been verified.
 
 ## Diagnostics and local files
 
@@ -69,6 +100,7 @@ This implementation targets **Fox Go AI Protocol v1.05 (2022-06-06)**. Automated
 ## Development and verification
 
 ```powershell
+python -m pip install "Pillow>=11.2.1"  # optional, enables vision tests
 python -m unittest discover -s tests -v
 node --check web/app.js  # optional JavaScript syntax check
 python scripts/smoke_real.py  # requires installed KataGo and model; uses a temporary game
@@ -76,7 +108,7 @@ python scripts/smoke_real.py  # requires installed KataGo and model; uses a temp
 
 `tests/fake_engine.py` is a deterministic protocol fixture used only in tests. The product never substitutes simulated analysis for KataGo. Tests cover board captures/ko, undo, SGF, GTP errors/timeouts/IDs, streaming analysis, save/restore, FoxGo packet framing and online edit locks, and HTTP origin/token/path protection.
 
-Architecture: `trainer/board.py` owns board/history; `gtp.py` frames subprocess requests and parses analysis; `app.py` serializes game operations; `fox.py` implements the direct loopback FoxGo controller; `server.py` serves the browser/API. The UI is plain JavaScript/SVG/CSS in `web/`, so there is no frontend build step. Run from a source checkout; this repository is not packaged as a standalone Python wheel.
+Architecture: `trainer/board.py` owns board/history; `gtp.py` frames subprocess requests and parses analysis; `app.py` serializes game operations; `fox.py` implements the direct loopback FoxGo controller; `foxgtp.py` handles the official relay; `vision.py` recognizes/tracks screen moves and `vision_native.py` isolates Windows capture/input; `server.py` serves the browser/API. The UI is plain JavaScript/SVG/CSS in `web/`, so there is no frontend build step. Run from a source checkout; this repository is not packaged as a standalone Python wheel.
 
 The UI optionally registers `read_go_position` and `play_local_go_move` when the experimental `document.modelContext` API exists. Ordinary browsers do not need it. This optional WebMCP surface has not been verified in a browser that implements that API.
 
