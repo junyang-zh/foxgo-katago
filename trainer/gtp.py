@@ -51,13 +51,13 @@ def parse_analysis(line):
 
 
 class GTP:
-    def __init__(self, command, log=lambda *args: None, timeout=120):
+    def __init__(self, command, log=lambda *args: None, timeout=120, cwd=None):
         self.log, self.timeout = log, timeout
         self.next_id = 0
         self.lock = threading.Lock()
         self.lines = queue.Queue()
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', bufsize=1,
+            stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', bufsize=1, cwd=cwd,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         threading.Thread(target=self._reader, daemon=True).start()
         threading.Thread(target=self._stderr, daemon=True).start()

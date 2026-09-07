@@ -75,11 +75,14 @@ Do not connect FoxGo directly to port 8001: FoxGo's proprietary checksummed prot
 ```powershell
 python -m unittest discover -s tests -v
 node --check web/app.js  # optional JavaScript syntax check
+python scripts/smoke_real.py  # requires installed KataGo and model; uses a temporary game
 ```
 
 `tests/fake_engine.py` is a deterministic protocol fixture used only in tests. The product never substitutes simulated analysis for KataGo. Tests cover board captures/ko, undo, SGF, GTP errors/timeouts/IDs, streaming analysis, save/restore, FoxGTP TCP framing and online edit locks, and HTTP origin/token/path protection.
 
 Architecture: `trainer/board.py` owns board/history; `gtp.py` frames subprocess requests and parses analysis; `app.py` serializes game operations; `fox.py` implements the loopback relay adapter; `server.py` serves the browser/API. The UI is plain JavaScript/SVG/CSS in `web/`, so there is no frontend build step. Run from a source checkout; this repository is not packaged as a standalone Python wheel.
+
+The UI optionally registers `read_go_position` and `play_local_go_move` when the experimental `document.modelContext` API exists. Ordinary browsers do not need it. This optional WebMCP surface has not been verified in a browser that implements that API.
 
 ## References
 

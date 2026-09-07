@@ -48,9 +48,13 @@ def main():
         z.extractall(destination)
     model = models / NETWORK
     download(MODEL_URL,model)
-    fingerprints = {str(p.relative_to(ROOT)):hashlib.file_digest(p.open('rb'),'sha256').hexdigest()
-                    for p in (archive,model)} if hasattr(hashlib,'file_digest') else {
-                        str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (archive,model)}
+    fingerprints = {}
+    for p in (archive,model):
+        digest = hashlib.sha256()
+        with p.open('rb') as source:
+            while block := source.read(1024*1024):
+                digest.update(block)
+        fingerprints[str(p.relative_to(ROOT))] = digest.hexdigest()
     (data/'install.json').write_text(json.dumps(dict(release=RELEASE,engineUrl=engine_url,
         modelUrl=MODEL_URL,sha256=fingerprints),indent=2),encoding='utf-8')
     settings = dict(executable=str(destination/'katago.exe'),model=str(model),

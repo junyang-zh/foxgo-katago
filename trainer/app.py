@@ -119,7 +119,7 @@ class Trainer:
             '-config', settings['config'], '-override-config',
             f'maxVisits={settings["visits"]},maxTime={settings["seconds"]},reportAnalysisWinratesAs=SIDETOMOVE,ponderingEnabled=false']
         # First OpenCL launch can compile and tune kernels for several minutes.
-        engine = GTP(command, self.log, timeout=600)
+        engine = GTP(command, self.log, timeout=600, cwd=ROOT)
         self.engine = engine
         try:
             name = engine.command('name')

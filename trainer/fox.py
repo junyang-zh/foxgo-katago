@@ -29,7 +29,7 @@ class FoxServer:
                 continue
             except OSError:
                 break
-            if self.client:
+            if self.stopped.is_set() or self.client:
                 client.close()
                 continue
             self.client = client
@@ -84,15 +84,17 @@ class FoxServer:
         finally:
             client.close()
             self.client = None
-            self.app.fox_connected = self.app.fox_ready = False
-            self.app.log('fox', 'FoxGTP disconnected. Reconnect and synchronize to resume.')
+            if self.app.fox_server is self:
+                self.app.fox_connected = self.app.fox_ready = False
+                self.app.log('fox', 'FoxGTP disconnected. Reconnect and synchronize to resume.')
 
     def stop(self):
         self.stopped.set()
         self.socket.close()
-        if self.client:
+        client = self.client
+        if client:
             try:
-                self.client.shutdown(socket.SHUT_RDWR)
+                client.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-            self.client.close()
+            client.close()
