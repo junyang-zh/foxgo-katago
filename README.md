@@ -15,6 +15,8 @@ python -m trainer.server
 
 Open **http://127.0.0.1:8173**, choose **Engine settings → Connect engine**. The installer fills in local paths. `./start.ps1` is an alternative launcher that can also use the Codex bundled Python runtime. Keep the terminal open while using the trainer; Ctrl+C stops the server and engine. Use `--port 8174` if the default port is occupied.
 
+For matches, `./start.ps1 -Background` runs the server independently of the launching terminal. It prints the process ID for stopping it and writes server output to `data/server.stdout.log` and `data/server.stderr.log`. Connect KataGo and start the listener in the panel after launch. If the backend stops, reconnect FoxGo after restarting it; a browser tab alone does not run the engine.
+
 The installer downloads official **KataGo v1.16.4 OpenCL for Windows** and **kata1-b28c512nbt-s13255194368-d5935380940**. This conservative OpenCL build supports the selected model and avoids a separate CUDA/cuDNN installation. The first start tunes GPU kernels and can take several minutes; later starts reuse its cache. On Linux/macOS, install your platform's KataGo build and set the executable/model/config paths manually. Paths with spaces are supported because subprocess arguments are passed as an array, without a shell.
 
 ## Local training

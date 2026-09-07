@@ -165,9 +165,16 @@ function renderLogs() {
   logs.slice(-100).forEach(l=>{const row=document.createElement('div');row.className='log-row'+(l.level==='error'?' error':'');[l.time,l.level,l.message].forEach((s,i)=>{const span=document.createElement('span');span.className=['log-time','log-level','log-message'][i];span.textContent=s;row.append(span);});box.append(row);});
   if(bottom) box.scrollTop=box.scrollHeight;
 }
+let backendOffline = false;
 async function poll() {
-  try {const r=await fetch('/api/state');if(!r.ok) throw Error('Server unavailable');state=await r.json();render();}
-  catch { $('engine-status').textContent='Local server disconnected';$('engine-dot').classList.remove('on'); }
+  try {const r=await fetch('/api/state');if(!r.ok) throw Error('Server unavailable');state=await r.json();if(backendOffline){lastNotice='';backendOffline=false;}render();}
+  catch {
+    backendOffline = true;
+    $('engine-status').textContent='Local server disconnected';$('engine-dot').classList.remove('on');
+    $('fox-status').textContent='Backend offline';
+    $('fox-detail').textContent='The trainer cannot receive or play moves until its backend is restarted.';
+    showNotice('Trainer backend offline. Start the server, then reconnect FoxGo to its AI listener.',true);
+  }
   setTimeout(poll,900);
 }
 function playPoint(x,y) {
